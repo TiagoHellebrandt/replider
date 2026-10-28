@@ -45,6 +45,11 @@ jobs:
         with:
           go-version-file: api/go.mod
           cache-dependency-path: api/go.sum
+      # main.go imports the swag-generated `docs` package, which is gitignored.
+      - name: Generate Swagger docs
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@latest
+          make swagger
       - name: go vet
         run: go vet ./...
       - name: Unit tests
