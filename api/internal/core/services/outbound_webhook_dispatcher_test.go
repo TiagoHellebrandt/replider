@@ -107,6 +107,21 @@ func (r *inMemoryWebhookRepo) Disable(_ context.Context, id string) error {
 	return nil
 }
 
+// successIDs snapshots the success list under the lock.
+func (r *inMemoryWebhookRepo) successIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.successes...)
+}
+
+// disabledIDs snapshots the disabled list under the lock; the dispatcher
+// writes it from its own goroutine.
+func (r *inMemoryWebhookRepo) disabledIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.disabled...)
+}
+
 // TestDispatcher_SignsAndDeliversOnce asserts that an Emit() call:
 //   - reaches the subscriber's URL exactly once
 //   - signs the body with HMAC-SHA256(secret) and ships it in
@@ -118,9 +133,11 @@ func TestDispatcher_SignsAndDeliversOnce(t *testing.T) {
 	var capturedBody []byte
 	var capturedSig string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
 		capturedBody, _ = io.ReadAll(r.Body)
 		capturedSig = r.Header.Get("X-Replider-Signature")
+		// Counted last: the atomic store publishes the captures above to the
+		// test goroutine, which reads them once it observes calls == 1.
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -150,11 +167,11 @@ func TestDispatcher_SignsAndDeliversOnce(t *testing.T) {
 
 	// Wait for the success record to land — RecordSuccess runs after
 	// the HTTP response is consumed, so it can race the assertion.
-	for i := 0; i < 100 && len(repo.successes) == 0; i++ {
+	for i := 0; i < 100 && len(repo.successIDs()) == 0; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(repo.successes) != 1 || repo.successes[0] != "w-1" {
-		t.Errorf("expected success record for w-1, got %v", repo.successes)
+	if got := repo.successIDs(); len(got) != 1 || got[0] != "w-1" {
+		t.Errorf("expected success record for w-1, got %v", got)
 	}
 }
 
@@ -204,11 +221,11 @@ func TestDispatcher_AutoDisablesOnRepeatedFailure(t *testing.T) {
 	d.sleep = func(context.Context, time.Duration) error { return nil }
 	d.Emit("acc-1", "message.received", nil)
 
-	for i := 0; i < 100 && len(repo.disabled) == 0; i++ {
+	for i := 0; i < 100 && len(repo.disabledIDs()) == 0; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(repo.disabled) != 1 || repo.disabled[0] != "w-3" {
-		t.Errorf("expected disable for w-3 after threshold breach; got %v", repo.disabled)
+	if got := repo.disabledIDs(); len(got) != 1 || got[0] != "w-3" {
+		t.Errorf("expected disable for w-3 after threshold breach; got %v", got)
 	}
 }
 
