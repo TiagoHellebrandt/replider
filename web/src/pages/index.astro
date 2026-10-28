@@ -1,0 +1,25 @@
+---
+// Root: pt-only desde a landing v2. nginx faz o 301 em produção; este shell
+// estático é o fallback (astro preview, CDN puro) e é crawler-safe.
+---
+
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Replider</title>
+    <meta name="robots" content="noindex, follow" />
+    <link rel="canonical" href="https://replider.com/pt/" />
+    <link rel="alternate" hreflang="pt" href="https://replider.com/pt/" />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://replider.com/pt/"
+    />
+    <meta http-equiv="refresh" content="0;url=/pt/" />
+  </head>
+  <body>
+    <p>Redirecionando para <a href="/pt/">Replider</a>…</p>
+  </body>
+</html>

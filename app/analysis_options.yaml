@@ -1,0 +1,31 @@
+include: package:flutter_lints/flutter.yaml
+
+# US-187: type-safety strict mode.
+# `strict-casts` bans implicit `dynamic`->T downcasts; `strict-inference`
+# bans invocations/literals whose type arguments can't be inferred. Both
+# surface as `warning`-severity diagnostics, so the CI `Analyze` step runs
+# `flutter analyze --no-fatal-infos` (warnings fatal, the pre-existing
+# info-level backlog grandfathered) and fails the build on any new
+# untyped/implicit-cast code. Generated `*.g.dart` (slang / json_serializable
+# / riverpod / retrofit) is code we don't own and routinely trips both
+# modes, so it's excluded from analysis below.
+#
+# US-099: Static guard against the memory/stream leaks audited in epic 12.
+# `cancel_subscriptions` flags StreamSubscriptions that are never cancelled;
+# `close_sinks` flags Sinks/StreamControllers that are never closed. Both are
+# promoted to `error` so `flutter analyze` exits non-zero and the CI `Analyze`
+# step fails the build on any new leak.
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+  exclude:
+    - "**/*.g.dart"
+  errors:
+    cancel_subscriptions: error
+    close_sinks: error
+
+linter:
+  rules:
+    cancel_subscriptions: true
+    close_sinks: true

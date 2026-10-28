@@ -1,0 +1,19 @@
+{
+  "name": "replider-e2e",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:demo": "playwright test tests/demo-flow.spec.ts --headed --project=desktop",
+    "test:video": "playwright test tests/demo-flow.spec.ts --project=desktop",
+    "report": "playwright show-report",
+    "seed": "npx tsx fixtures/seed.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^25.5.2",
+    "http-server": "^14.1.1",
+    "serve": "^14.2.6",
+    "tsx": "^4.19.0"
+  }
+}

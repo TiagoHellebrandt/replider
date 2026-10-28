@@ -1,0 +1,667 @@
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - "nginx/**"
+      - "docker-compose.prod.yml"
+      - ".github/workflows/deploy-api.yml"
+  # US-009: run the test job (tenant-isolation suite included) on every PR
+  # that touches the API, before it can merge. build-push/deploy are gated
+  # to push events only, so a PR run is test-only.
+  #
+  # NO paths filter on pull_request — deliberately. The four jobs here are
+  # REQUIRED status checks on main; a path-filtered workflow simply never
+  # runs on an app/web-only PR, the contexts stay "Expected — waiting", and
+  # with enforce_admins on, the merge is stuck forever. Instead the workflow
+  # runs on every PR and the `changes` job below skips the expensive jobs
+  # when api/ is untouched — a skipped required check reports and satisfies
+  # the protection, a missing one blocks it.
+  pull_request:
+  # NO workflow_dispatch. A manual dispatch could build-push+deploy from any
+  # branch, skipping the checks a merge to main carries — the exact side door
+  # that let SetUserNotifyPhone reach production with the tenant guard red.
+  # Emergency procedure (with mandatory logging): docs/deploy-emergencia.md.
+
+env:
+  IMAGE: ghcr.io/caritium/replider-api
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # NEVER cancel a deploy in flight. On 2026-08-18 a push during the Deploy
+  # job cancelled it mid `docker compose up`: the api container was removed
+  # and never recreated — 502 for ten minutes. Queued runs wait instead;
+  # the newer one still ships the newest SHA.
+  cancel-in-progress: false
+
+jobs:
+  # Cheap path probe so the required checks ALWAYS report (see the trigger
+  # comment). On push events api is always considered changed — push runs
+  # are already path-filtered by the trigger itself.
+  changes:
+    name: Detect API changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "api=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          if git diff --name-only "$base" HEAD | grep -qE '^(api/|nginx/|docker-compose\.prod\.yml|\.github/workflows/deploy-api\.yml)'; then
+            echo "api=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=false" >> "$GITHUB_OUTPUT"
+            echo "No API-relevant changes — required checks will report as skipped (which satisfies branch protection)."
+          fi
+
+  # US-035 + US-186: lint gate. bodyclose/rowserrcheck/sqlclosecheck/govet
+  # run at a true zero baseline (fail on any finding). errcheck/gosec are
+  # broadened in via only-new-issues — the gate fails on findings in a PR's
+  # diff while grandfathering the ~150 pre-existing legacy findings as tech
+  # debt. fetch-depth: 0 is required so the action can compute the diff base.
+  # Config in api/.golangci.yml.
+  lint:
+    name: Lint (leak gate)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      # US-188: format gate. gofmt -l prints every file that is not
+      # canonically formatted; a non-empty list fails the job so a PR
+      # cannot merge unformatted Go.
+      - name: gofmt check
+        working-directory: api
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following Go files are not gofmt-formatted. Run 'gofmt -w .' in api/:"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "All Go files are gofmt-clean."
+
+      # US-190: migration linter. Fails the job if any *.up.sql contains a
+      # destructive DROP TABLE/COLUMN without an `-- ALLOW-DESTRUCTIVE`
+      # marker. Up migrations auto-run on deploy (entrypoint.prod.sh), so an
+      # unmarked drop would silently destroy customer data. See
+      # docs/migrations.md. Runs from repo root (not working-directory: api).
+      - name: Migration linter (no unmarked destructive DDL)
+        run: ./scripts/lint-migrations.sh
+
+      # US-F013 / V17: a sqlc query against a multi-tenant table with no
+      # account_id predicate is a cross-tenant leak that single-account test
+      # fixtures never catch. Pre-existing queries are grandfathered in
+      # scripts/tenant_query_allowlist.txt; anything NEW must be scoped or
+      # explicitly justified there. --self-test proves the checker still bites
+      # before we trust its green.
+      - name: Tenant-scope query guard
+        working-directory: api
+        run: |
+          python3 scripts/check_tenant_queries.py --self-test
+          python3 scripts/check_tenant_queries.py
+
+      # Pontas soltas: coluna sem escritor, construtor descartado em main.go,
+      # rota sem chamador no app, porta sem adapter. Três dessas conviveram
+      # com 439 arquivos de teste (contact_ref_id, CompanyDataProvider,
+      # import sem porta pro funil). A dívida de hoje está congelada em
+      # scripts/dangling_allowlist.txt; o gate reprova só ocorrência NOVA.
+      - name: Dangling-middle guard
+        working-directory: api
+        run: |
+          python3 scripts/check_dangling.py --self-test
+          python3 scripts/check_dangling.py
+
+      # Make origin/main resolvable so golangci-lint can compute the
+      # new-since-baseline diff locally via git (below).
+      - name: Fetch main for lint baseline
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      # main.go imports `_ "github.com/replider/api/docs"` (swag v1 output,
+      # gitignored). golangci-lint typechecks the whole tree, so without the
+      # generated docs package it hard-fails with "no required module provides
+      # package …/docs" regardless of the new-from filter. Generate it first,
+      # mirroring the test/build-push jobs.
+      - name: Install Swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+      - name: Generate Swagger Docs
+        working-directory: api
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          make swagger
+
+      - name: golangci-lint
+        # v7 is required for golangci-lint v2 (our .golangci.yml is `version: "2"`);
+        # action v6 only supports v1 and hard-errors on a v2.x.x version string.
+        #
+        # We DON'T use `only-new-issues: true`: that mode fetches the PR patch
+        # via the GitHub API, which hard-caps at 300 changed files and 406s
+        # ("diff exceeded the maximum number of files") on large PRs. Instead we
+        # let golangci-lint compute the new-since-main set from git locally via
+        # `--new-from-merge-base` — same grandfathering of the ~150 legacy
+        # errcheck/gosec findings, no file-count ceiling. Needs the fetch above
+        # plus the checkout's fetch-depth: 0.
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: api
+          args: --new-from-merge-base=origin/main
+
+      # US-194: regenerate the published OpenAPI 3.1 spec and assert it is a
+      # valid 3.1 document. This keeps `make swagger-v3` working (it drives the
+      # Redoc site at docs.replider.com, whose spec is committed under
+      # nginx/docs/openapi/v1/) and fails the PR if the generator breaks.
+      - name: OpenAPI 3.1 spec generates (make swagger-v3)
+        working-directory: api
+        run: |
+          make swagger-v3
+          spec=../nginx/docs/openapi/v1/swagger.json
+          if ! grep -q '"openapi": *"3\.1' "$spec"; then
+            echo "::error::$spec is not a valid OpenAPI 3.1 document"
+            exit 1
+          fi
+          echo "OpenAPI 3.1 spec generated OK."
+
+  test:
+    name: Test
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Install Swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Generate Swagger Docs
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          make swagger
+
+      - name: Run tests
+        run: go test $(go list ./... | grep -v /e2e) -count=1
+
+  # The e2e suite, which until now ran nowhere but a developer's laptop.
+  #
+  # `test` above deliberately excludes it (`grep -v /e2e`) because it needs a
+  # real Postgres. The consequence was that the gate could not see the class of
+  # bug that lives BELOW the use case: a route mounted under the wrong role
+  # group, a middleware that narrows where it was meant to widen, an
+  # authorisation check ordered after the payload bind. Every one of those
+  # passes `go test` — the use case is correct; the wiring is not.
+  #
+  # Same service image and CLI as the `migrations` job. TestMain drops and
+  # re-applies the schema itself, so this starts from an empty database.
+  e2e:
+    name: E2E (real Postgres)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    # The hard bound for a real hang; the go -timeout below is the soft one.
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: replider
+          POSTGRES_PASSWORD: replider
+          POSTGRES_DB: replider_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U replider -d replider_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DB_URL: postgres://replider:replider@localhost:5432/replider_e2e?sslmode=disable
+      MIGRATE_VERSION: v4.18.1
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      # TestMain shells out to `migrate` — it is a runtime dependency of the
+      # suite, not a build one.
+      - name: Install golang-migrate CLI
+        run: |
+          curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" \
+            | tar xz
+          sudo mv migrate /usr/local/bin/migrate
+          migrate -version
+
+      # -timeout 40m: the suite runs well past `go test`'s 10m default, and the
+      # default does not fail with a useful message — it panics the whole binary
+      # mid-run, which reads as a hang rather than a slow suite. It takes ~15m
+      # on a normal runner and hit the old 25m ceiling twice on slow ones
+      # (2026-08-18, 2026-08-19), each time a push to main that only the rerun
+      # deployed. 40m is headroom, not a target: the job-level timeout below
+      # still bounds a real hang.
+      # -p 1: one package at a time. The tests share a single database.
+      - name: Run e2e
+        run: go test ./internal/e2e/ -count=1 -p 1 -timeout 40m
+
+  # Validate that every migration actually applies on a real Postgres before
+  # an API change can merge. `go test` is mock-based and never touches the DB,
+  # so a broken DDL (bad column type, missing pgvector op, unpaired down) would
+  # otherwise only surface on prod boot — entrypoint.prod.sh runs `migrate up`
+  # with `set -e`, so a bad migration crash-loops the live container. This job
+  # is the safety net: fresh DB -> up (all) -> down (all) -> up (all) round-trip.
+  #
+  # The service image MUST be pgvector/pgvector:pg16 (not plain postgres):
+  # 000001_init_schema.up.sql does `CREATE EXTENSION vector`, which fails on a
+  # stock postgres image. Mirrors docker-compose.dev.yml / docker-compose.test.yml.
+  migrations:
+    name: Migrations apply (real Postgres)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: replider
+          POSTGRES_PASSWORD: replider
+          POSTGRES_DB: replider_test
+        ports:
+          - 5432:5432
+        # Gate the steps until Postgres accepts connections, otherwise the
+        # first `migrate` call races container boot and flakes.
+        options: >-
+          --health-cmd "pg_isready -U replider -d replider_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # sslmode=disable: the service container speaks plaintext on localhost.
+      DB_URL: postgres://replider:replider@localhost:5432/replider_test?sslmode=disable
+      MIGRATE_VERSION: v4.18.1
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install golang-migrate CLI
+        run: |
+          curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" \
+            | tar xz
+          sudo mv migrate /usr/local/bin/migrate
+          migrate -version
+
+      # 1) Fresh DB -> apply ALL up migrations. Fails on any broken up file.
+      #    -verbose prints each migration as it runs, so a failure points at
+      #    the exact NNNNNN file in the Actions log.
+      - name: migrate up (all)
+        run: migrate -path db/migrations -database "$DB_URL" -verbose up
+
+      # 2) Round-trip: tear the schema all the way down, then re-apply. Validates
+      #    the *down* files (paired, often untested) reverse cleanly and that the
+      #    up set is re-runnable from zero. A broken/unpaired down fails here
+      #    instead of on a future production rollback.
+      - name: migrate down (all) then up (all) — round-trip
+        run: |
+          migrate -path db/migrations -database "$DB_URL" -verbose down -all
+          migrate -path db/migrations -database "$DB_URL" -verbose up
+
+      # 3) A migration that failed mid-apply leaves schema_migrations.dirty=true.
+      #    Assert the final state is clean (psql ships in the pgvector image, but
+      #    we run it from the runner against the service port).
+      - name: Assert schema_migrations is not dirty
+        env:
+          PGPASSWORD: replider
+        run: |
+          dirty=$(psql -h localhost -U replider -d replider_test -tAc \
+            "SELECT dirty FROM schema_migrations LIMIT 1;")
+          echo "schema_migrations.dirty = '${dirty}'"
+          if [ "$dirty" != "f" ]; then
+            echo "::error::Migrations left the schema in a dirty state."
+            exit 1
+          fi
+
+  build-push:
+    name: Build & Push
+    needs: [test, lint, migrations, e2e]
+    # ONLY a push to main produces a deployable image. `!= pull_request` was
+    # wider than it looked: it also admitted manual dispatches from any branch.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Install Swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Generate Swagger Docs
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          make swagger
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: api
+          file: api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: build-push
+    # Redundant with build-push's own guard on purpose: if the condition above
+    # is ever loosened, this one still refuses to ship anything but main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production-api
+      url: https://api.replider.com
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute image tag
+        id: tag
+        run: echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Write .env
+        run: |
+          install -m 644 /dev/null .env
+          # Vars (não-sensíveis: DB_NAME, AI_PROVIDER, SMTP_PORT, APP_BASE_URL, etc.)
+          echo "$VARS_JSON" | jq -r '
+            to_entries | .[] | "\(.key)=\"\(.value | gsub("[\\n\\r]"; ""))\""
+          ' >> .env
+          # Secrets: exclui os de infraestrutura (VPS_*, GHCR_*) e o token interno do GitHub
+          echo "$SECRETS_JSON" | jq -r '
+            to_entries
+            | map(select(.key | ascii_downcase | test("^github_token$|^vps_|^ghcr_|^cloudflare_") | not))
+            | .[] | "\(.key)=\"\(.value | gsub("[\\n\\r]"; ""))\""
+          ' >> .env
+          # Pina a tag SHA exata da imagem da API para que `docker compose`
+          # use sempre o artefato correto do CI — sem depender do fallback :latest.
+          echo "API_IMAGE_TAG=\"$API_IMAGE_TAG\"" >> .env
+          # O SHA que está rodando, para o Sentry release e /health/details.
+          echo "RELEASE_SHA=\"$API_IMAGE_TAG\"" >> .env
+        env:
+          SECRETS_JSON: ${{ toJson(secrets) }}
+          VARS_JSON: ${{ toJson(vars) }}
+          API_IMAGE_TAG: ${{ steps.tag.outputs.value }}
+
+      - name: Write Cloudflare certs
+        run: |
+          mkdir -p nginx/certs
+          printf '%s' "$CLOUDFLARE_ORIGIN_CERT" > nginx/certs/cloudflare.crt
+          printf '%s' "$CLOUDFLARE_ORIGIN_KEY"  > nginx/certs/cloudflare.key
+        env:
+          CLOUDFLARE_ORIGIN_CERT: ${{ secrets.CLOUDFLARE_ORIGIN_CERT }}
+          CLOUDFLARE_ORIGIN_KEY: ${{ secrets.CLOUDFLARE_ORIGIN_KEY }}
+
+      - name: Copy compose + nginx + scripts + .env to VPS
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          # docker/ carries the db image's build context (postgres+wal-g).
+          # Without it `compose up db` has nothing to build from, so the
+          # image on the VPS can never be updated — which is why US-F002
+          # shipped and never actually ran.
+          source: "docker-compose.prod.yml,docker/,nginx/,scripts/,.env"
+          target: ~/replider
+          strip_components: 0
+          timeout: 120s
+          command_timeout: 10m
+
+      - name: Deploy API
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          envs: GHCR_TOKEN,GHCR_USERNAME,API_IMAGE_TAG
+          timeout: 120s
+          command_timeout: 15m
+          script: |
+            set -e
+            cd ~/replider
+            chmod 600 .env
+
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+            chmod 400 nginx/certs/cloudflare.key
+
+            # `--build` matters for db: the service declares BOTH `build:`
+            # and `image:`, and compose only builds when that image tag is
+            # missing locally. Once it exists on the VPS, every later deploy
+            # silently reuses it — a change to the wal-g entrypoint would
+            # never arrive, while the config around it looks applied.
+            # Layers are cached, so the rebuild costs seconds.
+            #
+            # Infra recreate-on-drift: docker compose's "up -d" should
+            # recreate containers when the compose service config
+            # changed, but for some changes (ports added without other
+            # diffs) it silently no-ops. We detect drift by hashing the
+            # compose file + .env and forcing recreate on the infra
+            # services when the hash differs from what we last deployed.
+            # Volumes persist across recreate so the DB data survives.
+            # O antivírus de anexos é opt-in por profile do compose. Quando
+            # COMPOSE_PROFILES inclui "antivirus", ele entra na lista de
+            # serviços de infra; quando não, nem é mencionado — pedir por um
+            # serviço de profile desativado é erro, não no-op.
+            INFRA_SERVICES="db redis pg-backup"
+            if grep -qE '^COMPOSE_PROFILES=.*antivirus' .env; then
+              # BOTH containers, and clamav-freshclam is the one that bit us.
+              # It was left off this list, so no deploy ever recreated it: a
+              # change to its limits or its command sat in the compose file
+              # looking applied while the running container kept the old one.
+              # That is how its memory cap stayed at 512M after being raised,
+              # and the signatures stayed frozen at 07/09 for eight days.
+              #
+              # The scanner is useless without the updater, so they belong on
+              # this line together.
+              INFRA_SERVICES="$INFRA_SERVICES clamav clamav-freshclam"
+              echo "[infra] antivirus profile enabled, clamav + freshclam included"
+            fi
+
+            COMPOSE_HASH_FILE=".deploy.infra.hash"
+            CURR_INFRA_HASH=$(sha256sum docker-compose.prod.yml .env | sha256sum | awk '{print $1}')
+            PREV_INFRA_HASH=$(cat "$COMPOSE_HASH_FILE" 2>/dev/null || echo "")
+            if [[ "$CURR_INFRA_HASH" != "$PREV_INFRA_HASH" ]]; then
+              echo "[infra] compose/.env drift detected, recreating $INFRA_SERVICES..."
+              # When backend network config changes, compose must drop+recreate
+              # the network. If any container is still attached (or compose
+              # state is inconsistent from a prior failed deploy), this fails
+              # with "active endpoints" or "not connected to the network".
+              # Tear down all backend services + api cleanly, force-remove the
+              # network if it lingers, then bring infra back up. Volumes
+              # persist so DB/Redis data survives. api is recreated by the
+              # subsequent pull+up step.
+              docker compose --env-file .env -f docker-compose.prod.yml rm -fs api $INFRA_SERVICES 2>/dev/null || true
+              docker network rm replider_backend 2>/dev/null || true
+              docker compose --env-file .env -f docker-compose.prod.yml up -d --build $INFRA_SERVICES
+              echo "$CURR_INFRA_HASH" > "$COMPOSE_HASH_FILE"
+            else
+              docker compose --env-file .env -f docker-compose.prod.yml up -d --build $INFRA_SERVICES
+            fi
+
+            # API — depends_on aguarda db e redis ficarem healthy
+            docker compose --env-file .env -f docker-compose.prod.yml pull api
+            docker compose --env-file .env -f docker-compose.prod.yml up -d --no-deps api
+
+            # Wait for the API to become healthy BEFORE touching nginx. The API
+            # runs DB migrations on boot (entrypoint.prod.sh, `set -e`): if a
+            # migration fails the container exits, and reloading nginx while the
+            # `api` upstream is unresolvable yields "host not found in upstream
+            # api". Surface the container logs on failure so the root cause is
+            # visible in the Actions log (we have no other window into the VPS).
+            echo "[api] waiting for container health..."
+            api_ok=""
+            for _ in $(seq 1 60); do
+              state=$(docker inspect -f '{{.State.Status}}' replider_api 2>/dev/null || echo missing)
+              health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' replider_api 2>/dev/null || echo none)
+              if [ "$state" = "exited" ] || [ "$state" = "dead" ]; then break; fi
+              if [ "$health" = "healthy" ]; then api_ok=yes; break; fi
+              if [ "$health" = "none" ] && [ "$state" = "running" ]; then api_ok=yes; break; fi
+              sleep 2
+            done
+
+            if [ -z "$api_ok" ]; then
+              echo "::error::API container did not become healthy — dumping diagnostics"
+              docker inspect -f 'status={{.State.Status}} exitcode={{.State.ExitCode}} restarts={{.RestartCount}}' replider_api 2>/dev/null || true
+              echo "---------- docker logs replider_api (tail 200) ----------"
+              docker logs --tail 200 replider_api 2>&1 || true
+              echo "---------- DB schema diagnostics ----------"
+              # Read DB creds from the .env we just wrote, then introspect the
+              # live schema (golang-migrate only stores the current version, not
+              # which files ran — we need the actual columns to craft an
+              # idempotent recovery migration after a renumber-induced skip).
+              DB_USER=$(grep -E '^DB_USER=' .env | head -1 | cut -d= -f2- | tr -d '"')
+              DB_NAME=$(grep -E '^DB_NAME=' .env | head -1 | cut -d= -f2- | tr -d '"')
+              DB_PASSWORD=$(grep -E '^DB_PASSWORD=' .env | head -1 | cut -d= -f2- | tr -d '"')
+              docker exec -e PGPASSWORD="$DB_PASSWORD" replider_db \
+                psql -U "$DB_USER" -d "$DB_NAME" -c "SELECT version, dirty FROM schema_migrations;" 2>&1 || true
+              docker exec -e PGPASSWORD="$DB_PASSWORD" replider_db \
+                psql -U "$DB_USER" -d "$DB_NAME" -c "\d account_usages" 2>&1 || true
+              echo "---------------------------------------------------------"
+              exit 1
+            fi
+            echo "[api] healthy"
+
+            # Nginx — `up -d` não recria o container quando só o conteúdo
+            # de bind mounts (conf.d/, certs/) muda. Então precisamos:
+            #   1. Garantir que o container está up (cria se não existir)
+            #   2. Testar a nova config
+            #   3. Fazer reload explícito (zero-downtime)
+            #   4. Fallback: recreate se o container estava parado ou o reload falhar
+            #
+            # IMPORTANTE: --no-deps impede que o Docker Compose recrie os containers
+            # app/web/widget (depends_on do nginx) usando imagens antigas em cache.
+            # Esses serviços são gerenciados por seus próprios workflows de deploy.
+            docker compose --env-file .env -f docker-compose.prod.yml up -d --no-deps nginx
+
+            if docker exec replider_nginx nginx -t 2>&1; then
+              echo "[nginx] config OK, reloading..."
+              docker exec replider_nginx nginx -s reload
+              echo "[nginx] reloaded successfully"
+            else
+              echo "[nginx] config test failed, forcing recreate..."
+              docker compose --env-file .env -f docker-compose.prod.yml up -d --no-deps --force-recreate nginx
+            fi
+
+            # Remove imagens antigas da API do VPS (tags SHA anteriores).
+            # Mantém a SHA atual e :latest; remove todo o resto do mesmo repositório.
+            # Sem isso, cada deploy acumula uma imagem de ~100MB no disco.
+            docker images "ghcr.io/caritium/replider-api" --format "{{.ID}} {{.Tag}}" \
+              | awk -v tag="$API_IMAGE_TAG" '$2 != tag && $2 != "latest" {print $1}' \
+              | sort -u | xargs -r docker rmi -f 2>/dev/null || true
+            # Remove layers órfãs (dangling) que sobraram
+            docker image prune -f
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          API_IMAGE_TAG: ${{ steps.tag.outputs.value }}
+
+  smoke:
+    name: Post-deploy smoke test
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      # Minimal health-check probe so a broken deploy fails the workflow
+      # immediately instead of waiting for a customer to report "my bot is
+      # offline". Retries a few times because the API restarts after
+      # migrations and may take 10-20s to be fully ready.
+      - name: Wait for /health
+        run: |
+          set -e
+          url="https://api.replider.com/health"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -s -o /tmp/resp -w "%{http_code}" "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "[smoke] healthy on attempt $i"
+              cat /tmp/resp
+              exit 0
+            fi
+            echo "[smoke] attempt $i got $code, retrying..."
+            sleep 6
+          done
+          echo "[smoke] /health never returned 200"
+          cat /tmp/resp || true
+          exit 1
+
+      - name: Public endpoints sanity
+        run: |
+          set -e
+          # Plans listing is public and touches the DB — confirms the app
+          # can both accept HTTP and query Postgres end-to-end.
+          curl -fsS https://api.replider.com/v1/plans | head -c 200
+          echo
+          # Swagger docs should be reachable so customer-facing API consumers
+          # can browse endpoints without logging in.
+          curl -fsS -o /dev/null -w "swagger status: %{http_code}\n" https://api.replider.com/swagger/doc.json
+

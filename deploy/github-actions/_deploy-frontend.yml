@@ -1,0 +1,99 @@
+name: Deploy Frontend (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: 'Compose service name: app or web'
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+      environment_url:
+        type: string
+        required: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment_url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute image tag
+        id: tag
+        run: echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Copy compose file to VPS
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          source: "docker-compose.prod.yml"
+          target: ~/replider
+          strip_components: 0
+
+      - name: Deploy ${{ inputs.service }}
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          # Pre-compute the env var name in the runner (bash 4+) so the
+          # remote script doesn't depend on bash-only ${VAR^^} expansion.
+          # appleboy/ssh-action runs the script via /bin/sh on most VPS
+          # base images, where ${VAR^^} fails with "bad substitution" and
+          # the resulting $APP_IMAGE_TAG / $WEB_IMAGE_TAG ends up empty.
+          # That made docker-compose silently fall back to :latest and
+          # never recreate the container — meaning every deploy since
+          # 2026-04-09 was a no-op. See: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html
+          envs: GHCR_TOKEN,GHCR_USERNAME,SERVICE,IMAGE_TAG,IMAGE_TAG_VAR
+          script: |
+            set -e
+            cd ~/replider
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            # Persiste a tag SHA exata no .env do VPS (upsert) para que
+            # `docker compose` use sempre o artefato correto do CI —
+            # sem depender do fallback :latest — inclusive em runs manuais.
+            if grep -q "^${IMAGE_TAG_VAR}=" .env 2>/dev/null; then
+              sed -i "s|^${IMAGE_TAG_VAR}=.*|${IMAGE_TAG_VAR}=\"${IMAGE_TAG}\"|" .env
+            else
+              echo "${IMAGE_TAG_VAR}=\"${IMAGE_TAG}\"" >> .env
+            fi
+            export "$IMAGE_TAG_VAR=$IMAGE_TAG"
+            docker compose -f docker-compose.prod.yml pull "$SERVICE"
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate --remove-orphans "$SERVICE"
+            docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+            # Remove imagens antigas do serviço do VPS (tags SHA anteriores).
+            # Mantém a SHA atual e :latest; remove todo o resto do mesmo repositório.
+            # Sem isso, cada deploy acumula uma imagem no disco do VPS.
+            docker images "ghcr.io/caritium/replider-${SERVICE}" --format "{{.ID}} {{.Tag}}" \
+              | awk -v tag="$IMAGE_TAG" '$2 != tag && $2 != "latest" {print $1}' \
+              | sort -u | xargs -r docker rmi -f 2>/dev/null || true
+            # Remove layers órfãs (dangling) que sobraram
+            docker image prune -f
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          SERVICE: ${{ inputs.service }}
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+          # SERVICE is "app" | "web" | "widget" → *_IMAGE_TAG.
+          # Pre-uppercased here in the runner shell (which IS bash) so
+          # the remote sh script just does plain `export "$VAR=value"`.
+          IMAGE_TAG_VAR: >-
+            ${{
+              inputs.service == 'app'    && 'APP_IMAGE_TAG'    ||
+              inputs.service == 'web'    && 'WEB_IMAGE_TAG'    ||
+              inputs.service == 'widget' && 'WIDGET_IMAGE_TAG' ||
+              'UNKNOWN_IMAGE_TAG'
+            }}

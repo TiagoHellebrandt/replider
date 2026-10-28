@@ -1,0 +1,36 @@
+# Prometheus configuration for the Replider monitoring stack (US-070).
+#
+# Loads the SLO alerting rules (infra/alerts.yaml) and ships firing alerts to
+# Alertmanager (infra/alertmanager.yml), which fans them out to Slack/Discord.
+#
+# Run locally / on the VPS alongside the API:
+#   docker run -p 9090:9090 \
+#     -v $(pwd)/infra/prometheus.yml:/etc/prometheus/prometheus.yml \
+#     -v $(pwd)/infra/alerts.yaml:/etc/prometheus/alerts.yaml \
+#     prom/prometheus
+# See docs/runbook_alerts.md for the full stack and a test procedure.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: replider-api
+    env: production
+
+rule_files:
+  - /etc/prometheus/alerts.yaml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: replider-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          # The API container exposes /metrics on its HTTP port. Lock this
+          # endpoint to the monitoring network at the proxy layer (see metrics.md).
+          - api:8080

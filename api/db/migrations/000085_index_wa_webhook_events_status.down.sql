@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_wa_webhook_events_status_received_at;

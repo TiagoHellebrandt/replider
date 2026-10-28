@@ -1,0 +1,19 @@
+[
+  {
+    "origin": [
+      "https://app.replider.com",
+      "http://localhost:4321",
+      "http://localhost:3000",
+      "http://localhost:8080"
+    ],
+    "method": ["PUT", "GET", "HEAD", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-MD5",
+      "ETag",
+      "x-goog-resumable"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

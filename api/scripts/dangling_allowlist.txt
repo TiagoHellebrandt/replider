@@ -1,0 +1,96 @@
+# Pontas soltas PRÉ-EXISTENTES ao gate (inventário de 2026-08-21).
+# Formato: <chave>  # justificativa. A chave é o texto do achado até o "  (".
+# O gate reprova só o que NÃO está aqui — esta lista congela a dívida de hoje
+# com uma razão revisável por linha; não adicione entrada sem justificativa.
+#
+# ── A) colunas sem escritor ────────────────────────────────────────────────
+column:accounts.inbound_debounce_seconds  # K1: lida com NULL=default de plataforma; nenhuma rota grava ainda — candidata a ponta real (falta UI/rota de configuração)
+column:app_logs.id  # ingestão de logs do app: escrita fora dos diretórios varridos (endpoint dedicado) — verificar forma do INSERT
+column:cnes_equipment_types.code  # dicionário público seedado NA MIGRAÇÃO por design (nota "CNES installed park" no CLAUDE.md)
+column:cnes_equipment_types.group_name  # idem — seed da migração é o escritor
+column:cnes_equipment_types.name  # idem — seed da migração é o escritor
+column:cnes_bed_types.code  # dicionário oficial de leitos (TAB_CNES/CNV/ESP_LEIT.CNV) seedado NA MIGRAÇÃO, mesma regra do cnes_equipment_types
+column:cnes_bed_types.name  # idem — seed da migração é o escritor
+column:cnes_habilitation_types.code  # dicionário oficial de habilitações (TAB_CNES/DBF/HABILITA.DBF) seedado NA MIGRAÇÃO, mesma regra do cnes_equipment_types
+column:cnes_habilitation_types.name  # idem — seed da migração é o escritor
+column:cnes_service_types.code  # dicionário oficial de serviços (TAB_CNES/DBF/S_CLASSEN.dbf) seedado NA MIGRAÇÃO, mesma regra do cnes_equipment_types
+column:cnes_service_types.name  # idem — seed da migração é o escritor
+column:contacts.company_id  # vínculo contato→empresa (US-M001): só a migração/backfill escreve — candidata a ponta real
+column:contacts.legacy_phone_id  # migração 000148: coluna de transição preenchida pela própria migração, morre com o legado
+column:discovered_contacts.dismissed_at  # escrita existe no fluxo de revisão; forma de UPDATE não reconhecida pelo parser — verificar
+column:discovered_contacts.imported_at  # idem
+column:messages.media_type  # legado pré-media_url; leitura residual — candidata a remoção
+column:messages.search_vector  # mantida por TRIGGER tsvector — o banco é o escritor
+column:plans.id  # catálogo seedado por migração; nunca há INSERT em runtime por design
+column:plans.name  # idem
+column:plans.stripe_marketing_item_id  # rail dormente do WA billing meter (migração 000056) — documentado como "nunca semeado" no CLAUDE.md
+column:plans.stripe_price_id  # catálogo seedado por migração
+column:plans.stripe_price_id_annual  # seedado pelo cmd/seed_stripe_prices (fora dos diretórios varridos)
+column:scam_reports.reported_by  # denúncia de golpe: escritor no fluxo MCP/inbox — forma não reconhecida, verificar
+column:whatsapp_flow_tokens.account_id  # WhatsApp Flows (US-058/59): feature arquivada no v2 enxuto, tabelas dormentes
+column:whatsapp_flow_tokens.channel_id  # idem
+column:whatsapp_flow_tokens.conversation_id  # idem
+column:whatsapp_flow_tokens.expires_at  # idem
+column:whatsapp_flow_tokens.flow_id  # idem
+column:whatsapp_flow_tokens.flow_token  # idem
+column:whatsapp_flow_tokens.recipient  # idem
+column:whatsapp_flows.account_id  # idem
+column:whatsapp_flows.channel_id  # idem
+column:whatsapp_flows.endpoint_uri  # idem
+column:whatsapp_flows.flow_id  # idem
+column:whatsapp_flows.flow_json  # idem
+column:whatsapp_flows.id  # idem
+column:whatsapp_flows.name  # idem
+column:whatsapp_flows.preview_url  # idem
+column:whatsapp_flows.waba_id  # idem
+#
+# ── C) rotas sem chamador em app/lib ───────────────────────────────────────
+route:POST /:id/calendars/:calendarId/test-connection  # tela de calendário nunca ganhou o botão de teste — candidata a ponta real
+route:POST /suggest-improvement  # A/B de abordagem: consumo planejado via MCP/copilot, tela não construída
+route:POST /generate-persona  # geração de persona do funil: consumida via MCP (upsert_funnel), sem tela
+route:POST /:id/meeting-booked  # marcado via MCP/copilot; tela do Kanban ainda não expõe
+route:GET /sales/case-metrics  # relatório de caso (US-M011): consumo via curl/MCP, tela arquivada no v2 enxuto
+route:POST /test-scenarios  # prompt builder v1 (agentes): tela apagada do app na onda 3 (2026-09-01); rota mantida por 'esconder, não apagar', consumo via curl
+route:GET /wizard-suggestions  # idem — sugestões do wizard de agente v1; tela apagada na onda 3, rota mantida
+route:GET /sales/case-report  # idem (US-M012)
+route:POST /:id/approach-experiments  # experimentos A/B: superfície MCP/owner, sem tela no app
+route:POST /:id/leads/draft-batch  # draft em lote: o app usa o overnight worker; rota é porta MCP/manual
+route:POST /sources/:id/ingest-url  # pipeline de ingestão de conhecimento: telas arquivadas no v2 enxuto
+route:GET /sources/:id/jobs  # idem
+route:GET /ingestion-jobs/:id  # idem
+route:POST /sources/:id/upload-url  # idem
+route:POST /sources/:id/ingest-pdf  # idem
+route:POST /billing-portal  # chamado pelo app via caminho montado dinamicamente (BillingActions) — segmento não aparece literal; verificar
+route:POST /retry-payment  # idem — fluxo de cobrança
+route:GET /me/onboarding-chat  # onboarding conversacional (K5): backend pronto, tela não integrada — candidata a ponta real
+route:POST /me/onboarding-chat  # idem
+route:POST /dismiss-offer  # descarte de oferta sugerida: consumo via MCP, tela pendente
+route:GET /sequences  # cadências: superfície consumida via MCP tools (list_sequences etc.), telas arquivadas no v2
+route:GET /sequences/:id  # idem
+route:PUT /sequences/:id  # idem
+route:DELETE /sequences/:id  # idem
+route:GET /portfolio/reorders  # recompra por portfólio: MCP (upcoming_reorders), sem tela
+route:GET /estimate  # estimativa de custo: consumo via curl/owner, sem tela
+route:POST /upload-url  # upload de contrato: tela de contratos arquivada no v2 enxuto
+route:POST /:id/reextract  # idem — reprocessamento de contrato
+route:GET /contract-alerts  # alertas de cláusula (§6.11 G5): MCP/owner, sem tela
+route:GET /contract-recoveries  # idem (G6)
+route:POST /contract-recoveries  # idem
+route:GET /contracts/:id/signatures  # assinatura eletrônica (G7): tela arquivada no v2 enxuto
+route:GET /expensive-conversations  # dashboard de custo por conversa (US-030): tela nunca construída — candidata a ponta real
+column:ibge_municipalities.name  # tabela de referência IBGE seedada pela migration 000220; só leitura (CityCodesByName)
+column:ibge_municipalities.name_norm  # idem
+column:ibge_municipalities.uf  # idem
+column:ibge_municipalities.code  # idem (chave da tabela de referência IBGE)
+route:POST /:id/learn-personality  # tela arquivada no v2 enxuto (2026-09-01); MCP/legacy only
+route:GET /:id/bulk-sending  # card de envio em lote removido do app (2026-09-01); rota mantida para MCP/legacy
+route:GET /:id/phone-numbers  # gestão de números WhatsApp removida do app (2026-09-01)
+route:GET /auto-assign  # rodízio de atendentes removido do app (2026-09-01); worker segue servindo a conta plataforma
+route:PUT /auto-assign  # idem
+route:POST /refine  # prompt builder arquivado no v2 enxuto (2026-09-01); MCP legacy
+route:POST /versions/:vid/rollback  # idem
+route:POST /sources/:id/chunks  # base de conhecimento arquivada no v2 enxuto (2026-09-01); MCP legacy
+route:GET /sources/:id/chunks  # idem
+route:DELETE /chunks/:id  # idem
+route:POST /:id/leads/from-contacts  # tela de contatos fundida na Carteira (2026-09-01); import já cria leads; rota serve first-offer/MCP
+route:POST /qualify  # formulário público da landing (web/src/components/SalesModal.tsx), fora do app

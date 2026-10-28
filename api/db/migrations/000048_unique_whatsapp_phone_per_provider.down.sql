@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_channels_unique_whatsapp_phone_number_id;

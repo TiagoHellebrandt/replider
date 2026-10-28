@@ -1,0 +1,59 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Go sum file - although typically committed, some prefer ignoring if strictly using go.mod
+# go.sum
+
+# IDE/Editor folders and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Docker
+.docker
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Project specific binaries
+/main
+/api
+/cmd/api/api
+/seed_stripe_prices
+/cmd/seed_stripe_prices/seed_stripe_prices
+/bin/*
+/tmp/
+
+# Coverage
+coverage.txt
+coverage.out
+
+# Swagger
+/docs/
+
+# Keys
+google-cloud-key.json

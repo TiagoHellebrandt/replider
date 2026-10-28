@@ -1,0 +1,47 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*-key.json
+*credentials*.json
+service-account*.json
+google-cloud-key.json
+
+# AI-tooling / editor per-user config
+.claude/
+.codex/
+.cursor/
+.devcontainer/
+.vscode/
+.idea/
+graphify-out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / coverage
+*.log
+coverage/
+coverage.out
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Terraform / OpenTofu
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

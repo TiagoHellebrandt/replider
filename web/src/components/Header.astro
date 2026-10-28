@@ -1,0 +1,47 @@
+---
+import { getLangFromUrl, useTranslations } from "../i18n/utils";
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+// pt-only (landing v2): o seletor de idioma saiu junto com /en/*.
+---
+
+<header
+  class="fixed top-0 left-0 right-0 z-50 px-2 py-4 md:px-6 md:py-6 pointer-events-none"
+>
+  <div
+    class="max-w-7xl mx-auto flex justify-between items-center bg-black/50 backdrop-blur-md border border-white/10 px-3 py-2 md:px-6 md:py-3 rounded-full pointer-events-auto"
+  >
+    <div class="flex items-center gap-2 md:gap-3">
+      <img src="/logo.svg" alt="Replider Logo" class="h-6 w-6 md:h-8 md:w-8" />
+      <div class="text-base md:text-xl font-bold tracking-tighter text-white">
+        Replider
+      </div>
+    </div>
+    <nav class="hidden md:flex gap-8 text-sm font-medium text-white/60">
+      <a
+        href={`/${lang}/`}
+        class="hover:text-white transition-colors rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        >{t("nav.home")}</a
+      >
+      <a
+        href={`/${lang}/#como-funciona`}
+        class="hover:text-white transition-colors rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        >{t("nav.como")}</a
+      >
+      <a
+        href={`/${lang}/#agendar`}
+        class="hover:text-white transition-colors rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        >{t("nav.agendar")}</a
+      >
+    </nav>
+    <div class="flex items-center gap-2 md:gap-4">
+      <a
+        href={`/${lang}/#agendar`}
+        data-track="InitiateCheckout"
+        class="bg-white text-black text-xs md:text-sm px-3 py-1.5 md:px-5 md:py-2 rounded-full font-bold inline-block focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        >{t("nav.try_free")}</a
+      >
+    </div>
+  </div>
+</header>

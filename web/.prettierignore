@@ -1,0 +1,10 @@
+dist/
+node_modules/
+.astro/
+src/content/
+*.webp
+package-lock.json
+# prettier-plugin-astro cannot parse the conditional, JSX-wrapped inline
+# analytics <script define:vars> in this file (SyntaxError on the embedded
+# IIFE). Excluded so the format gate stays green; format it by hand.
+src/layouts/Layout.astro

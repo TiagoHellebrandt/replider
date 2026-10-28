@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://replider.com/en/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://replider.com/pt/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://replider.com/en/privacy/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://replider.com/pt/privacy/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://replider.com/en/terms/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://replider.com/pt/terms/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://replider.com/en/dpa/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://replider.com/pt/dpa/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://replider.com/en/blog/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://replider.com/pt/blog/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://replider.com/en/blog/how-ai-transforming-customer-service</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/pt/blog/como-ia-transformando-atendimento</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/en/blog/5-reasons-automate-whatsapp</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/pt/blog/5-motivos-automatizar-whatsapp</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/en/blog/rag-vs-traditional-chatbots</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/pt/blog/rag-vs-chatbots-tradicionais</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/en/blog/how-to-setup-ai-agent-5-minutes</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/pt/blog/como-configurar-agente-ia-5-minutos</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/en/blog/omnichannel-support-whatsapp-telegram-instagram</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/pt/blog/atendimento-omnichannel-whatsapp-telegram-instagram</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://replider.com/en/compare/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://replider.com/pt/compare/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+</urlset>

@@ -1,0 +1,46 @@
+# golangci-lint config.
+#
+# US-035 bootstrapped this gate with the two leak detectors (bodyclose,
+# rowserrcheck). US-186 broadens it to the full audit set:
+#
+#   bodyclose     net/http response bodies must be Closed
+#   rowserrcheck  sql.Rows.Err() must be checked after iteration
+#   sqlclosecheck sql.Rows / sql.Stmt must be Closed
+#   errcheck      returned errors must not be silently dropped
+#   gosec         security-focused static analysis
+#   govet         the standard go vet checks
+#
+# Adoption strategy for a pre-existing tree: the new linters (errcheck,
+# gosec) surface ~150 legacy findings that are tracked as tech debt, not
+# fixable in one change without risk. So CI runs with `only-new-issues:
+# true` (see deploy-api.yml) — the gate fails on findings introduced by a
+# PR's diff while grandfathering the existing baseline. bodyclose,
+# rowserrcheck, sqlclosecheck and govet are already at a true zero baseline
+# across the whole tree, so they fail on any finding, new or old.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose # net/http response bodies must be Closed
+    - errcheck # returned errors must not be silently dropped
+    - gosec # security-focused static analysis
+    - govet # standard go vet checks
+    - rowserrcheck # sql.Rows.Err() must be checked after iteration
+    - sqlclosecheck # sql.Rows / sql.Stmt must be Closed
+  exclusions:
+    # Test code legitimately ignores errors (assert-driven), embeds
+    # throwaway credentials, and shells out to the migrate binary with
+    # constructed args — gosec/errcheck noise there is not actionable.
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+issues:
+  # 0 = no cap on reported issues (golangci already exits non-zero on any
+  # finding). bodyclose/rowserrcheck/sqlclosecheck/govet baseline is zero,
+  # so any of their findings shows up in full and fails the PR.
+  max-issues-per-linter: 0
+  max-same-issues: 0

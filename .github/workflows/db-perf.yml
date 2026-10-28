@@ -1,0 +1,60 @@
+name: DB Perf Gate
+
+# US-062: detect new slow queries before merge. Spins up a pgvector Postgres,
+# applies every migration, seeds the hot read-path tables with >1k rows, and
+# runs each tagged query under api/db/perf/queries/ through EXPLAIN ANALYZE.
+# Fails the PR if any query Seq Scans more than 1000 rows (a dropped/unused
+# index). See docs/db-perf.md.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/db/**"
+      - ".github/workflows/db-perf.yml"
+  pull_request:
+    paths:
+      - "api/db/**"
+      - ".github/workflows/db-perf.yml"
+  workflow_dispatch:
+
+jobs:
+  explain-analyze:
+    name: EXPLAIN ANALYZE tagged queries
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector image — migration 000001 does `CREATE EXTENSION vector`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: replider
+          POSTGRES_PASSWORD: replider
+          POSTGRES_DB: replider_perf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U replider"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://replider:replider@localhost:5432/replider_perf?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install psql + jq + golang-migrate
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client jq
+          curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/v4.17.1/migrate.linux-amd64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin migrate
+          migrate -version
+
+      - name: Apply migrations
+        run: migrate -path api/db/migrations -database "$DATABASE_URL" up
+
+      - name: Seed hot tables
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f api/db/perf/seed.sql
+
+      - name: Run EXPLAIN ANALYZE perf gate
+        run: api/db/perf/check.sh "$DATABASE_URL"

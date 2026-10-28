@@ -1,0 +1,56 @@
+services:
+  replider-db:
+    image: pgvector/pgvector:pg16
+    container_name: replider_db
+    networks:
+      - dev
+    environment:
+      POSTGRES_USER: replider
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: replider_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U replider -d replider_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  replider-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: replider_api_dev
+    env_file:
+      - .env
+    environment:
+      PORT: 8080
+      DB_HOST: replider-db
+      DB_PORT: 5432
+      DB_USER: replider
+      DB_PASSWORD: secret
+      DB_NAME: replider_db
+      DB_SSLMODE: disable
+    ports:
+      - "8080:8080"
+      - "4040:4040"
+    depends_on:
+      replider-db:
+        condition: service_healthy
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      # Keep the go module cache inside the container for speed
+      - go-mod-cache:/go/pkg/mod
+    networks:
+      - dev
+
+volumes:
+  pgdata:
+  go-mod-cache:
+
+networks:
+  dev:
+    name: replider_dev

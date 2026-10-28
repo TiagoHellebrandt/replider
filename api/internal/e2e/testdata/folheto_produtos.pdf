@@ -1,0 +1,51 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Length 292 >>
+stream
+BT /F1 14 Tf 50 780 Td (Catalogo MedTech Hospitalar 2026) Tj
+0 -30 Td (Produto: Tomografo Portatil TX-1) Tj
+0 -20 Td (SKU: TX1-2026  Marca: MedTech  Modelo: TX-1) Tj
+0 -20 Td (Preco: R$ 150.000,00  Unidade: unidade) Tj
+0 -20 Td (Descricao: tomografia computadorizada portatil 16 cortes) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Length 251 >>
+stream
+BT /F1 14 Tf 50 780 Td (Pagina 2 - Linha de Ventilacao) Tj
+0 -30 Td (Produto: Ventilador Pulmonar V-200) Tj
+0 -20 Td (SKU: V200  Marca: MedTech) Tj
+0 -20 Td (Preco: 1.234) Tj
+0 -20 Td (Descricao: ventilador pulmonar para UTI adulto e pediatrico) Tj ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000373 00000 n 
+0000000470 00000 n 
+0000000813 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1115
+%%EOF

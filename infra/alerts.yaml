@@ -1,0 +1,115 @@
+# Prometheus alerting rules for the Replider API SLOs (US-070).
+#
+# These rules fire against the metrics exported on the API's /metrics endpoint
+# (see docs/metrics.md). They are loaded by Prometheus via `rule_files` in
+# infra/prometheus.yml and routed to Slack/Discord by infra/alertmanager.yml.
+#
+# Metric references (exact names — do not rename without updating these rules):
+#   http_requests_total{method,path,status}          counter  (middleware/metrics.go)
+#   http_request_duration_seconds_bucket{method,path} histogram (middleware/metrics.go)
+#   ai_calls_total{provider,operation,outcome}        counter  (services/ai_metrics.go)
+#   log_lines_total{level}                            counter  (observability/log_metrics.go)
+#
+# SLO targets (see docs/runbook_alerts.md):
+#   - HTTP 5xx error rate            < 1%
+#   - HTTP p95 request latency       < 2s
+#   - LLM provider failure rate      < 5%
+#   - Log volume (cost guardrail)    < 2x the trailing-1h baseline
+#
+# Every ratio rule guards against divide-by-zero / no-traffic noise by
+# requiring a non-zero request rate in the denominator.
+
+groups:
+  - name: replider-api-slo
+    rules:
+      # --- 5xx error rate > 1% over 5m -----------------------------------
+      - alert: HighHTTP5xxRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.01
+          and
+          sum(rate(http_requests_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "API 5xx error rate above 1% ({{ $value | humanizePercentage }})"
+          description: >-
+            The share of HTTP responses with a 5xx status has exceeded the 1%
+            SLO for 5 minutes (currently {{ $value | humanizePercentage }}).
+          runbook_url: "https://github.com/TiagoHellebrandt/replider/blob/main/docs/runbook_alerts.md#highhttp5xxrate"
+
+      # --- p95 latency > 2s over 5m --------------------------------------
+      - alert: HighHTTPLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 2
+          and
+          sum(rate(http_request_duration_seconds_count[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "API p95 latency above 2s ({{ $value | humanizeDuration }})"
+          description: >-
+            The 95th-percentile HTTP request latency has exceeded the 2s SLO for
+            5 minutes (currently {{ $value | humanizeDuration }}).
+          runbook_url: "https://github.com/TiagoHellebrandt/replider/blob/main/docs/runbook_alerts.md#highhttplatencyp95"
+
+      # --- AI failure rate > 5% over 5m ----------------------------------
+      - alert: HighAIFailureRate
+        expr: |
+          (
+            sum(rate(ai_calls_total{outcome="error"}[5m]))
+            /
+            sum(rate(ai_calls_total[5m]))
+          ) > 0.05
+          and
+          sum(rate(ai_calls_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          slo: ai_availability
+        annotations:
+          summary: "LLM provider failure rate above 5% ({{ $value | humanizePercentage }})"
+          description: >-
+            The share of failed LLM provider calls (chat/stream/embeddings) has
+            exceeded the 5% SLO for 5 minutes (currently
+            {{ $value | humanizePercentage }}). Check provider status and the
+            circuit breaker state.
+          runbook_url: "https://github.com/TiagoHellebrandt/replider/blob/main/docs/runbook_alerts.md#highaifailurerate"
+
+      # --- Log volume > 2x trailing-1h baseline over 5m -------------------
+      # Cost guardrail (US-075): a managed log sink bills per GB ingested, so
+      # a runaway loop or a newly-chatty path inflates the invoice silently.
+      # Compare the recent 5m emit rate against the trailing-1h average; >2x
+      # for 10m means volume has roughly doubled and is worth a look. The
+      # `> 1` guard suppresses noise when the baseline is near-idle (a quiet
+      # service trivially "doubles" from 0.1 to 0.3 lines/s).
+      - alert: HighLogVolume
+        expr: |
+          sum(rate(log_lines_total[5m]))
+          >
+          2 * sum(rate(log_lines_total[1h] offset 5m))
+          and
+          sum(rate(log_lines_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          slo: cost
+        annotations:
+          summary: "Log volume above 2x baseline ({{ $value | humanize }} lines/s)"
+          description: >-
+            The 5-minute log emission rate has exceeded 2x the trailing-1h
+            baseline for 10 minutes (currently {{ $value | humanize }}
+            lines/s). A runaway log loop drives up ingestion cost — find the
+            chatty path before the bill does. See the retention policy in
+            docs/logging.md.
+          runbook_url: "https://github.com/TiagoHellebrandt/replider/blob/main/docs/runbook_alerts.md#highlogvolume"

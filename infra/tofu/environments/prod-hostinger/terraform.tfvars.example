@@ -1,0 +1,5 @@
+# Copy to terraform.tfvars (gitignored) or pass with -var.
+# Zone id: Cloudflare dashboard -> replider.com -> Overview -> right column.
+cloudflare_zone_id = "REPLACE_ME"
+origin_ipv4        = "REPLACE_ME"   # current VPS IP
+ttl                = 300

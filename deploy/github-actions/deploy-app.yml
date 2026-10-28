@@ -1,0 +1,195 @@
+name: Deploy App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/deploy-app.yml'
+      - '.github/workflows/_deploy-frontend.yml'
+  # PRs that touch the app run the FORMAT and TEST gates. `test` (analyze +
+  # the widget suite) used to be push-only, which meant every app PR merged
+  # blind and the DEPLOY was the first place a failure showed. The result was
+  # a production app 5 days stale behind a freshly deployed API, and nothing
+  # in the PR flow said so. Build-push and deploy stay push-only — those
+  # publish, and publishing is not something a PR should do.
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/deploy-app.yml'
+  # NO workflow_dispatch. A manual dispatch could build-push+deploy from any
+  # branch, skipping the checks a merge to main carries — same side door
+  # closed on deploy-api. Emergency procedure (with mandatory logging):
+  # docs/deploy-emergencia.md.
+
+env:
+  IMAGE: ghcr.io/caritium/replider-app
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # US-188: dart format gate. Uses the standalone Dart SDK (formatting is
+  # syntax-level and needs no Flutter toolchain) so the PR check is fast.
+  # `--set-exit-if-changed` fails the job if any non-generated file under
+  # lib/ or test/ would be reformatted. Generated `*.g.dart` is excluded
+  # (`! -name '*.g.dart'`) because slang's strings*.g.dart output is not
+  # dart-format-clean — including it would make every `dart run slang`
+  # regeneration break the gate. dart 3.12 has no config/flag exclusion, so
+  # the file list is filtered with find.
+  format:
+    name: Format check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v6
+      # Use Flutter (not standalone Dart) + `pub get` so `dart format` can
+      # resolve the package config and read the package's language version
+      # (pubspec SDK `>=3.5.0`). Without it, `dart format` cannot resolve the
+      # `flutter_lints` include in analysis_options.yaml, assumes the latest
+      # language version, and applies the new "tall" style to the whole tree
+      # — reformatting hundreds of files and failing the gate spuriously.
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: flutter pub get
+        run: flutter pub get
+      - name: dart format check
+        run: dart format --output=none --set-exit-if-changed $(find lib test -name '*.dart' ! -name '*.g.dart')
+
+  test:
+    name: Test
+    # Runs on PRs too. It is the only gate that catches an analyzer diagnostic
+    # the author's local Flutter is too old to emit — the exact failure that
+    # blocked this workflow for fourteen consecutive runs.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+      # US-096: ban raw `<err>.toString()` in the View layer. All
+      # user-visible error copy must route through parseApiError(); this
+      # grep gate keeps the epic-11 fixes from regressing.
+      - name: Error .toString() guard
+        run: ./tool/check_error_tostring.sh
+      # US-111: ban raw `NetworkImage(` / `Image.network(` outside the
+      # AppNetworkImage definition. Epic 13 routed every network image
+      # through AppNetworkImage (placeholder + error fallback + cacheWidth);
+      # this grep gate keeps the caching fixes from regressing.
+      - name: Network image guard
+        run: ./tool/check_network_image.sh
+      # US-187: type-safety strict mode + US-099 leak guard.
+      # analysis_options.yaml enables `strict-casts` + `strict-inference`,
+      # which surface implicit `dynamic` downcasts and un-inferable type
+      # arguments as `warning`-severity diagnostics; `cancel_subscriptions`
+      # and `close_sinks` are promoted to `error`. `--no-fatal-infos` makes
+      # warnings (and errors) fatal so any new untyped/implicit-cast code or
+      # stream leak fails the build, while the pre-existing info-level
+      # backlog (deprecated_member_use, use_build_context_synchronously) is
+      # grandfathered and does not block deploys. Generated `*.g.dart` is
+      # excluded from analysis in analysis_options.yaml.
+      - name: Analyze (type-safety strict mode + leak guard)
+        run: flutter analyze --no-fatal-infos
+      - name: Run tests
+        run: flutter test
+
+  build-push:
+    name: Build & Push
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # The Flutter web build embeds GOOGLE_CLIENT_ID at compile time via
+    # `--dart-define`. That secret lives in the `production-app` environment,
+    # so this job MUST declare the environment to read it. Without this,
+    # `secrets.GOOGLE_CLIENT_ID` resolves to an empty string, the build
+    # silently produces a binary with no client ID, and the auth widget
+    # falls back to the old custom button at runtime.
+    environment:
+      name: production-app
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build Flutter Web
+        working-directory: app
+        # --pwa-strategy=none disables Flutter's service worker. We had
+        # persistent "user sees old version" reports — the default
+        # `offline-first` SW was caching the bundle and only flipping
+        # on the *second* reload after an update. Combined with the
+        # no-cache headers on nginx.conf for index.html and the entry
+        # JS files, `none` gives us immediate updates at the cost of
+        # offline support (which the dashboard doesn't need anyway).
+        run: |
+          flutter build web --release --pwa-strategy=none --no-tree-shake-icons \
+            --dart-define=FLUTTER_WEB_USE_SKIA=false \
+            --dart-define=API_BASE_URL=https://api.replider.com/v1 \
+            --dart-define=GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
+            --dart-define=WHATSAPP_APP_ID=${{ secrets.WHATSAPP_APP_ID }} \
+            --dart-define=WHATSAPP_EMBEDDED_CONFIG_ID=${{ secrets.WHATSAPP_EMBEDDED_CONFIG_ID }} \
+            --dart-define=SENTRY_DSN=${{ secrets.SENTRY_DSN }} \
+            --dart-define=SENTRY_ENVIRONMENT=production
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: app
+          file: app/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: build-push
+    # Redundant with build-push's guard on purpose: if that condition is
+    # ever loosened, this one still refuses to ship anything but main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_deploy-frontend.yml
+    with:
+      service: app
+      environment: production-app
+      environment_url: https://app.replider.com
+    secrets: inherit

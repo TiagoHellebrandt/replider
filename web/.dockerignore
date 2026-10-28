@@ -1,0 +1,12 @@
+node_modules/
+src/
+public/
+.astro/
+.git/
+*.md
+*.mjs
+*.ts
+*.astro
+package.json
+package-lock.json
+tsconfig.json

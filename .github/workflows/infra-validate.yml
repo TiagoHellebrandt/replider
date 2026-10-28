@@ -1,0 +1,35 @@
+# US-F014: keep the DNS declaration syntactically honest.
+#
+# Only validate/fmt — a `plan` would need a production Cloudflare token on a
+# runner, and read-only-ish credentials in CI are how tokens leak. The gate
+# that matters (plan comes out clean after import) is a human step, once,
+# documented in infra/tofu/README.md.
+name: Infra validate
+
+on:
+  push:
+    paths: ["infra/tofu/**", ".github/workflows/infra-validate.yml"]
+  pull_request:
+    paths: ["infra/tofu/**"]
+
+jobs:
+  tofu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.12.0"
+
+      - name: Format check
+        run: tofu fmt -recursive -check -diff infra/tofu
+
+      - name: Validate module
+        run: |
+          tofu -chdir=infra/tofu/modules/dns init -backend=false
+          tofu -chdir=infra/tofu/modules/dns validate
+
+      - name: Validate environment
+        run: |
+          tofu -chdir=infra/tofu/environments/prod-hostinger init -backend=false
+          tofu -chdir=infra/tofu/environments/prod-hostinger validate

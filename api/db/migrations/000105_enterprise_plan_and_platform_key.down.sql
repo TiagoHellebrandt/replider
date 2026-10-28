@@ -1,0 +1,2 @@
+ALTER TABLE accounts DROP COLUMN IF EXISTS platform_key_allowed;
+DELETE FROM plans WHERE id = '01PLAN_ENTERPRISE_00000';

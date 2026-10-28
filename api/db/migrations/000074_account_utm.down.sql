@@ -1,0 +1,3 @@
+ALTER TABLE accounts DROP COLUMN IF EXISTS utm_campaign;
+ALTER TABLE accounts DROP COLUMN IF EXISTS utm_medium;
+ALTER TABLE accounts DROP COLUMN IF EXISTS utm_source;

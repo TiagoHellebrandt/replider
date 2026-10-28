@@ -1,0 +1,241 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Header from "../../components/Header.astro";
+import Hero from "../../components/Hero.astro";
+import { BookCall } from "../../components/BookCall";
+import { FAQ } from "../../components/FAQ";
+import { CookieConsent } from "../../components/CookieConsent";
+import { getLangFromUrl, useTranslations } from "../../i18n/utils";
+
+// pt-only desde a landing v2 (2026-08-20): o GTM americano foi descartado e
+// /en/* responde 301 → /pt/* no astro.config.
+export function getStaticPaths() {
+  return [{ params: { lang: "pt" } }];
+}
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
+const seoT = {
+  title: t("seo.title") as string,
+  description: t("seo.description") as string,
+};
+
+const heroT = {
+  title: t("hero.title") as string,
+  highlight: t("hero.highlight") as string,
+  subtitle: t("hero.subtitle") as string,
+  ctaBook: t("hero.cta_book") as string,
+  ctaWhats: t("hero.cta_whats") as string,
+  whatsPrefill: t("hero.whats_prefill") as string,
+};
+
+// BookCall + SalesModal compartilham o dicionário (o modal abre de dentro da
+// seção). O teste dictionary-wiring valida cada chave lida contra este objeto.
+const bookT = {
+  "book.eyebrow": t("book.eyebrow") as string,
+  "book.title": t("book.title") as string,
+  "book.subtitle": t("book.subtitle") as string,
+  "book.cta": t("book.cta") as string,
+  "book.whatsapp": t("book.whatsapp") as string,
+  "book.write": t("book.write") as string,
+  "book.note": t("book.note") as string,
+  "pricing.sales_form_title": t("pricing.sales_form_title") as string,
+  "pricing.sales_form_subtitle": t("pricing.sales_form_subtitle") as string,
+  "pricing.sales_form_company": t("pricing.sales_form_company") as string,
+  "pricing.sales_form_email": t("pricing.sales_form_email") as string,
+  "pricing.sales_form_size": t("pricing.sales_form_size") as string,
+  "pricing.sales_form_size_placeholder": t(
+    "pricing.sales_form_size_placeholder",
+  ) as string,
+  "pricing.sales_form_volume": t("pricing.sales_form_volume") as string,
+  "pricing.sales_form_volume_placeholder": t(
+    "pricing.sales_form_volume_placeholder",
+  ) as string,
+  "pricing.sales_form_channels": t("pricing.sales_form_channels") as string,
+  "pricing.sales_form_message": t("pricing.sales_form_message") as string,
+  "pricing.sales_form_submit": t("pricing.sales_form_submit") as string,
+  "pricing.sales_form_submitting": t("pricing.sales_form_submitting") as string,
+  "pricing.sales_form_success": t("pricing.sales_form_success") as string,
+  "pricing.sales_form_error": t("pricing.sales_form_error") as string,
+  "pricing.sales_form_required": t("pricing.sales_form_required") as string,
+  "pricing.sales_form_close": t("pricing.sales_form_close") as string,
+};
+
+const faqT = {
+  "faq.title": t("faq.title") as string,
+  "faq.subtitle": t("faq.subtitle") as string,
+  "faq.items": t("faq.items") as any,
+  "faq.tab_billing": t("faq.tab_billing") as string,
+  "faq.tab_technical": t("faq.tab_technical") as string,
+  "faq.tab_sales": t("faq.tab_sales") as string,
+};
+
+const steps = [
+  { title: t("how.s1_title"), body: t("how.s1_body") },
+  { title: t("how.s2_title"), body: t("how.s2_body") },
+  { title: t("how.s3_title"), body: t("how.s3_body") },
+];
+
+const lines = [
+  {
+    title: t("lines.venda_title"),
+    signal: t("lines.venda_signal"),
+    offer: t("lines.venda_offer"),
+  },
+  {
+    title: t("lines.locacao_title"),
+    signal: t("lines.locacao_signal"),
+    offer: t("lines.locacao_offer"),
+  },
+  {
+    title: t("lines.assist_title"),
+    signal: t("lines.assist_signal"),
+    offer: t("lines.assist_offer"),
+  },
+];
+---
+
+<Layout title={seoT.title} description={seoT.description} lang={lang}>
+  <Header />
+  <main>
+    <Hero t={heroT} />
+
+    <!-- O problema, do jeito que o dono sente (§3.2 do plano): três frases,
+         sem estatística inventada. -->
+    <section class="py-20 px-4 bg-[#050505]">
+      <div class="max-w-3xl mx-auto text-center">
+        <p
+          class="text-xs uppercase tracking-widest text-sky-400/80 font-bold mb-6"
+        >
+          {t("problem.eyebrow")}
+        </p>
+        <div
+          class="space-y-4 text-xl md:text-2xl text-white/80 leading-relaxed"
+        >
+          <p>{t("problem.l1")}</p>
+          <p>{t("problem.l2")}</p>
+          <p class="text-white font-semibold">{t("problem.l3")}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Como funciona: o onboarding em prosa. -->
+    <section id="como-funciona" class="py-24 px-4 bg-[#030303]">
+      <div class="max-w-5xl mx-auto">
+        <p
+          class="text-xs uppercase tracking-widest text-sky-400/80 font-bold mb-3 text-center"
+        >
+          {t("how.eyebrow")}
+        </p>
+        <h2 class="text-3xl md:text-4xl font-bold text-white text-center mb-14">
+          {t("how.title")}
+        </h2>
+        <div class="grid md:grid-cols-3 gap-6">
+          {
+            steps.map((s) => (
+              <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-7">
+                <h3 class="text-lg font-bold text-white mb-3">{s.title}</h3>
+                <p class="text-sm text-white/60 leading-relaxed">{s.body}</p>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- O que o dono vê: a tese da visibilidade. -->
+    <section class="py-20 px-4 bg-[#050505]">
+      <div class="max-w-3xl mx-auto text-center">
+        <p
+          class="text-xs uppercase tracking-widest text-sky-400/80 font-bold mb-3"
+        >
+          {t("owner.eyebrow")}
+        </p>
+        <h2 class="text-2xl md:text-3xl font-bold text-white mb-5">
+          {t("owner.title")}
+        </h2>
+        <p class="text-white/60 leading-relaxed">{t("owner.body")}</p>
+      </div>
+    </section>
+
+    <!-- Venda · Locação · Assistência: o sinal que lemos e a oferta que sai. -->
+    <section class="py-24 px-4 bg-[#030303]">
+      <div class="max-w-5xl mx-auto">
+        <p
+          class="text-xs uppercase tracking-widest text-sky-400/80 font-bold mb-10 text-center"
+        >
+          {t("lines.eyebrow")}
+        </p>
+        <div class="grid md:grid-cols-3 gap-6">
+          {
+            lines.map((l) => (
+              <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-7">
+                <h3 class="text-lg font-bold text-white mb-4">{l.title}</h3>
+                <p class="text-sm text-white/50 leading-relaxed mb-3">
+                  <span class="text-white/70 font-semibold">Sinal: </span>
+                  {l.signal}
+                </p>
+                <p class="text-sm text-white/50 leading-relaxed">
+                  <span class="text-sky-400/90 font-semibold">Oferta: </span>
+                  {l.offer}
+                </p>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- Onde o dado vem: transparência como prova de seriedade. -->
+    <section class="py-20 px-4 bg-[#050505]">
+      <div class="max-w-3xl mx-auto text-center">
+        <p
+          class="text-xs uppercase tracking-widest text-sky-400/80 font-bold mb-3"
+        >
+          {t("sources.eyebrow")}
+        </p>
+        <h2 class="text-2xl md:text-3xl font-bold text-white mb-5">
+          {t("sources.title")}
+        </h2>
+        <p class="text-white/60 leading-relaxed">{t("sources.body")}</p>
+      </div>
+    </section>
+
+    <FAQ client:visible t={faqT} />
+
+    <section id="agendar">
+      <BookCall client:visible t={bookT} />
+    </section>
+  </main>
+
+  <!-- Rodapé enxuto (§3.9): sem Recursos/Indústrias/Comparar/Blog. -->
+  <footer class="py-12 border-t border-white/5 bg-black px-6">
+    <div
+      class="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-white/40"
+    >
+      <div>{t("footer.rights")}</div>
+      <div class="flex gap-6">
+        <a href={`/${lang}/privacy`} class="hover:text-white transition-colors"
+          >{t("footer.privacy")}</a
+        >
+        <a href={`/${lang}/terms`} class="hover:text-white transition-colors"
+          >{t("footer.terms")}</a
+        >
+        <a href={`/${lang}/dpa`} class="hover:text-white transition-colors"
+          >{t("footer.dpa")}</a
+        >
+        <a href={`/${lang}/#agendar`} class="hover:text-white transition-colors"
+          >{t("footer.contact")}</a
+        >
+      </div>
+    </div>
+  </footer>
+
+  <CookieConsent
+    client:idle
+    message={t("cookie.message") as string}
+    acceptLabel={t("cookie.accept") as string}
+    declineLabel={t("cookie.decline") as string}
+  />
+</Layout>

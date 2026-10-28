@@ -1,0 +1,9 @@
+-- Intentional no-op.
+--
+-- 000098 only RE-DELIVERS schema that the originals 000069_stripe_event_retry
+-- and 000070_daily_token_cap own (idempotently). Those originals carry the
+-- authoritative down migrations, and account_usages.daily_tokens is now also
+-- relied on by 000087's materialized view. Dropping anything here would
+-- corrupt databases where the originals (or 000087) legitimately created
+-- these objects, so the reversal belongs to the owning migrations, not this
+-- recovery shim.

@@ -1,0 +1,299 @@
+---
+interface Props {
+  title: string;
+  description: string;
+  lang: string;
+  /**
+   * Per-page Open Graph / Twitter card image. Pass a site-absolute path
+   * (e.g. "/og/pricing.png"); it's resolved to a fully-qualified URL below.
+   * Falls back to the generic brand icon when a page doesn't set one.
+   */
+  ogImage?: string;
+}
+
+const { title, description, lang, ogImage } = Astro.props;
+// Social crawlers (Twitter/LinkedIn/Facebook) require an ABSOLUTE og:image URL.
+// Per-page cards under /og/ are 1200x630; the /icon.png fallback is square,
+// so only emit the size hint when a dedicated card is supplied.
+const hasCard = Boolean(ogImage);
+const ogImageUrl = new URL(ogImage ?? "/icon.png", "https://replider.com").href;
+import "../styles/global.css";
+import { WhatsAppFab } from "../components/WhatsAppFab";
+import { ui } from "../i18n/ui";
+
+
+// Pull WA FAB copy from the same i18n table the rest of the site uses.
+// Cast to any so TS doesn't choke on per-locale union types — the keys
+// live under both "en" and "pt" so the lookup is always safe.
+// pt-only: qualquer lang resolve no dicionário português.
+const t = (ui as any).pt;
+const waFab = {
+  label: t['wa_fab.label'],
+  subtitle: t['wa_fab.subtitle'],
+  cta: t['wa_fab.cta'],
+  prefill: encodeURIComponent(t['wa_fab.prefill']),
+};
+
+const currentPath = Astro.url.pathname;
+const pathWithoutLang = currentPath.replace(/^\/(en|pt)/, '') || '/';
+
+// Suppress the WhatsApp FAB on registration/auth flows (US-148). The marketing
+// site links out to app.replider.com/register today, but if any in-site
+// register/signup/auth route is ever added the floating "Talk to us" button
+// would compete with the conversion the user is already mid-way through —
+// hide it there. Matched against the lang-stripped path so /pt/register works.
+const isRegisterFlow = /^\/(register|signup|sign-up|auth|login)(\/|$)/.test(pathWithoutLang);
+const canonicalUrl = `https://replider.com/${lang}${pathWithoutLang}`;
+const altLang = lang === 'en' ? 'pt' : 'en';
+
+// US-010: blog RSS feed for the current language. The en feed lives at the
+// site root (/rss.xml); pt is nested (/pt/rss.xml) — matches the endpoints
+// under src/pages/. Emitted on every page so feed discovery works site-wide.
+const rssHref = lang === 'pt' ? 'https://replider.com/pt/rss.xml' : 'https://replider.com/rss.xml';
+const rssTitle = lang === 'pt' ? 'Blog Replider' : 'Replider Blog';
+
+const softwareApplicationSchema = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Replider",
+  "url": "https://replider.com",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web, iOS, Android",
+  "description": lang === 'pt'
+    ? "Plataforma de atendimento ao cliente com IA omnichannel"
+    : "Omnichannel AI customer service platform",
+  // AggregateOffer gives the SoftwareApplication rich result a price floor.
+  // Currency follows the page's pricing UI (US-009): pt shows BRL (what
+  // billing charges), en shows the USD display mapping from src/i18n/ui.ts.
+  // Range tracks Solo→Scale.
+  "offers": lang === 'pt'
+    ? {
+        "@type": "AggregateOffer",
+        "priceCurrency": "BRL",
+        "lowPrice": "199",
+        "highPrice": "3990",
+        "offerCount": "5"
+      }
+    : {
+        "@type": "AggregateOffer",
+        "priceCurrency": "USD",
+        "lowPrice": "39",
+        "highPrice": "799",
+        "offerCount": "5"
+      }
+});
+
+const organizationSchema = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Replider",
+  "url": "https://replider.com",
+  "logo": "https://replider.com/logo.svg",
+  "description": lang === 'pt'
+    ? "Plataforma de atendimento ao cliente com IA omnichannel"
+    : "Omnichannel AI customer service platform",
+  "email": "support@replider.com",
+  "sameAs": [],
+  "contactPoint": {
+    "@type": "ContactPoint",
+    "email": "support@replider.com",
+    "contactType": "customer support",
+    "availableLanguage": ["English", "Portuguese"]
+  }
+});
+
+// FAQ JSON-LD is rebuilt straight from the i18n source so the schema
+// stays in lockstep with the visible FAQ component — no separate copy
+// to drift. Only emits on the localised home page; the canonical match
+// guards against polluting blog/legal pages with the wrong schema.
+const faqSchema = currentPath.match(/^\/(en|pt)\/?$/) ? JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": (t['faq.items'] as Array<{question: string; answer: string}>).map((item) => ({
+    "@type": "Question",
+    "name": item.question,
+    "acceptedAnswer": { "@type": "Answer", "text": item.answer },
+  })),
+}) : null;
+---
+
+<!DOCTYPE html>
+<html lang={lang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <!-- Canonical & Open Graph / Social SEO -->
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImageUrl} />
+    {hasCard && <meta property="og:image:width" content="1200" />}
+    {hasCard && <meta property="og:image:height" content="630" />}
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <!-- Hreflang -->
+    <link rel="alternate" hreflang="pt" href={`https://replider.com/pt${pathWithoutLang}`} />
+    <link rel="alternate" hreflang="x-default" href={`https://replider.com/pt${pathWithoutLang}`} />
+
+    <!-- Blog RSS feed (current language) -->
+    <link rel="alternate" type="application/rss+xml" title={rssTitle} href={rssHref} />
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json" set:html={softwareApplicationSchema} />
+    <script type="application/ld+json" set:html={organizationSchema} />
+    {faqSchema && <script type="application/ld+json" set:html={faqSchema} />}
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!--
+      Analytics & retargeting pixels — GA4, Meta Pixel, Google Ads.
+      Every loader is gated on cookie consent (LGPD/GDPR): nothing fires until
+      the visitor accepts via CookieConsent.tsx, which dispatches a synthetic
+      `storage` event so same-tab consent is picked up immediately. Each pixel
+      emits its own <script> block only when its PUBLIC_* id is configured.
+    -->
+    {(import.meta.env.PUBLIC_GA_MEASUREMENT_ID || import.meta.env.PUBLIC_META_PIXEL_ID || import.meta.env.PUBLIC_GOOGLE_ADS_ID) && (
+      <script
+        is:inline
+        define:vars={{
+          gaId: import.meta.env.PUBLIC_GA_MEASUREMENT_ID,
+          metaPixelId: import.meta.env.PUBLIC_META_PIXEL_ID,
+          googleAdsId: import.meta.env.PUBLIC_GOOGLE_ADS_ID,
+        }}
+      >
+        (function() {
+          var loaded = false;
+
+          function ensureGtag() {
+            window.dataLayer = window.dataLayer || [];
+            if (!window.gtag) {
+              window.gtag = function(){ window.dataLayer.push(arguments); };
+              window.gtag('js', new Date());
+            }
+            if (!document.querySelector('script[src*="googletagmanager"]')) {
+              var s = document.createElement('script');
+              s.async = true;
+              s.src = 'https://www.googletagmanager.com/gtag/js?id=' + (gaId || googleAdsId);
+              document.head.appendChild(s);
+            }
+          }
+
+          function loadGA() {
+            if (!gaId) return;
+            ensureGtag();
+            window.gtag('config', gaId);
+          }
+
+          function loadGoogleAds() {
+            if (!googleAdsId) return;
+            ensureGtag();
+            window.gtag('config', googleAdsId);
+          }
+
+          function loadMetaPixel() {
+            if (!metaPixelId || window.fbq) return;
+            (function(f,b,e,v,n,t,s){
+              if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+              n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+              if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+              n.queue=[];t=b.createElement(e);t.async=!0;
+              t.src=v;s=b.getElementsByTagName(e)[0];
+              s.parentNode.insertBefore(t,s)})(window,document,'script',
+              'https://connect.facebook.net/en_US/fbevents.js');
+            window.fbq('init', metaPixelId);
+          }
+
+          // Unified event dispatcher used by React/Astro components.
+          // No-op until pixels have actually loaded (consent given).
+          window.trackEvent = function(name, params) {
+            if (window.fbq) window.fbq('track', name, params || {});
+            if (window.gtag) window.gtag('event', name, params || {});
+          };
+
+          function loadAll() {
+            if (loaded) return;
+            loaded = true;
+            loadGA();
+            loadGoogleAds();
+            loadMetaPixel();
+            // Standard funnel-top events once pixels are live.
+            window.trackEvent('PageView');
+            window.trackEvent('ViewContent');
+            // Fire InitiateCheckout on any Register/Start CTA click.
+            document.addEventListener('click', function(e) {
+              var el = e.target && e.target.closest ? e.target.closest('[data-track]') : null;
+              if (el) window.trackEvent(el.getAttribute('data-track'));
+            });
+          }
+
+          if (localStorage.getItem('cookie-consent') === 'accepted') {
+            loadAll();
+          }
+          // Listen for consent changes (fired by CookieConsent component)
+          window.addEventListener('storage', function(e) {
+            if (e.key === 'cookie-consent' && e.newValue === 'accepted') loadAll();
+          });
+        })();
+      </script>
+    )}
+  </head>
+  <body class="bg-[#0A0A0A] text-white">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:font-semibold focus:text-black focus:outline-none focus:ring-2 focus:ring-emerald-400"
+    >
+      {lang === 'pt' ? 'Pular para conteúdo' : 'Skip to content'}
+    </a>
+    <slot />
+    {!isRegisterFlow && <WhatsAppFab client:idle {...waFab} />}
+
+    {/* US-003: a visitor landing anywhere on the site with ?ref=CODE (seller
+        prospecting link or customer referral) must not lose the code when
+        they click a register CTA — forward it onto every app register link.
+        First-party attribution, not tracking: runs without cookie consent. */}
+    <script is:inline>
+      {`(function () {
+        var ref = new URLSearchParams(location.search).get('ref');
+        if (!ref) return;
+        document.querySelectorAll('a[href]').forEach(function (a) {
+          var href = a.getAttribute('href');
+          if (!href) return;
+          var isRegister = href.indexOf('https://app.replider.com/register') === 0 ||
+            href === '/register' || href.indexOf('/register?') === 0;
+          if (!isRegister || href.indexOf('ref=') !== -1) return;
+          a.setAttribute('href', href + (href.indexOf('?') === -1 ? '?' : '&') + 'ref=' + encodeURIComponent(ref));
+        });
+      })();`}
+    </script>
+
+    {/* US-167: register the Workbox service worker (generated at build into
+        /sw.js) for repeat-visit caching + offline fallback. Production only —
+        a SW in `astro dev` causes stale-asset confusion. */}
+    {import.meta.env.PROD && (
+      <script is:inline>
+        {`if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js').catch(function () {});
+          });
+        }`}
+      </script>
+    )}
+  </body>
+</html>

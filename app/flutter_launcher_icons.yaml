@@ -1,0 +1,18 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/logo_white.webp"
+  # iOS fills transparency with white; a white logo needs its own opaque dark-background source
+  image_path_ios: "assets/ios_icon.png"
+  adaptive_icon_background: "#0A0A0A"
+  adaptive_icon_foreground: "assets/logo_white.webp"
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/logo_white.webp"
+    background_color: "#0A0A0A"
+    theme_color: "#0A0A0A"
+  macos:
+    generate: true
+    image_path: "assets/logo_white.webp"

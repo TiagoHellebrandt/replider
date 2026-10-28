@@ -1,0 +1,21 @@
+# Gitleaks config: default rules plus an allowlist of reviewed test fixtures.
+# Every path below was checked by hand before the public release; none holds
+# a live credential (Svix docs example secret, AbacatePay's documented public
+# HMAC key, fake Twilio SIDs, throwaway e2e passwords, a fixed AES test key).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed test fixtures and documented public keys"
+paths = [
+  '''api/internal/adapters/channels/email/webhook_signature_test\.go''',
+  '''api/internal/adapters/http/handlers/inbound_email_fetch_test\.go''',
+  '''api/internal/adapters/payment/abacatepay_adapter\.go''',
+  '''api/internal/adapters/secrets/aes_gcm_test\.go''',
+  '''api/internal/core/usecases/channel_usecases_test\.go''',
+  '''api/internal/e2e/account_invites_test\.go''',
+  '''api/internal/e2e/email_inbound_test\.go''',
+  '''api/internal/e2e/channel_credentials_at_rest_test\.go''',
+  '''api/internal/e2e/journey_first_customer_test\.go''',
+  '''app/test/features/onboarding/presentation/controllers/onboarding_controller_test\.dart''',
+]

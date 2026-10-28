@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0a;
+  --color-accent: #3b82f6;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+body {
+  @apply bg-background text-white font-sans antialiased selection:bg-accent/30;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+/*
+ * US-155: When the early-adopter discount banner is shown, Layout adds
+ * `has-promo` to <body>. The banner is a fixed bar pinned to the very top, so
+ * push the floating header down by its height to keep them from overlapping.
+ * Unlayered (wins over Tailwind's `top-0` utility). When the promo expires the
+ * class is dropped (build-time, or client-side) and the header returns to top.
+ */
+body.has-promo {
+  --promo-banner-h: 2.25rem;
+}
+body.has-promo header {
+  top: var(--promo-banner-h);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 10px;
+}
+
+/* Respect users who prefer reduced motion (vestibular accessibility) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

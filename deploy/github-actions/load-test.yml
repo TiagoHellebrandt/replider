@@ -1,0 +1,87 @@
+name: Load Test (k6)
+
+# US-195: weekly perf-regression gate over the three hottest API paths
+# (inbound webhook, conversation list, AI reply). See infra/load/README.md.
+#
+# Always validates the k6 scripts compile (`k6 inspect`). When a target
+# environment is configured via the `LOAD_TEST_BASE_URL` repo variable it
+# runs the full suite against it and uploads summary.json for baseline
+# tracking. Without a target it stays a script-validation gate so the
+# workflow is never red just because no staging URL is wired up yet.
+on:
+  schedule:
+    # Mon 09:00 UTC = 06:00 America/Sao_Paulo (matches dependabot cadence).
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL to load test (overrides the LOAD_TEST_BASE_URL var)"
+        required: false
+        type: string
+  pull_request:
+    # Validate the scripts whenever the suite itself changes.
+    paths:
+      - "infra/load/**"
+      - ".github/workflows/load-test.yml"
+
+env:
+  K6_VERSION: "0.50.0"
+
+jobs:
+  k6:
+    name: Run k6 suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install k6
+        run: |
+          set -e
+          curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
+            | tar xz --strip-components=1 -C /usr/local/bin "k6-v${K6_VERSION}-linux-amd64/k6"
+          k6 version
+
+      - name: Validate scripts compile
+        run: |
+          set -e
+          for f in infra/load/all.js infra/load/scenarios/*.js; do
+            echo "::group::k6 inspect $f"
+            k6 inspect "$f"
+            echo "::endgroup::"
+          done
+
+      - name: Resolve target URL
+        id: target
+        run: |
+          URL="${{ github.event.inputs.base_url }}"
+          if [ -z "$URL" ]; then
+            URL="${{ vars.LOAD_TEST_BASE_URL }}"
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          if [ -z "$URL" ]; then
+            echo "::notice::No LOAD_TEST_BASE_URL configured — running script validation only. Set the repo variable to enable the full load run."
+          fi
+
+      - name: Run load suite
+        if: steps.target.outputs.url != ''
+        env:
+          BASE_URL: ${{ steps.target.outputs.url }}
+          AUTH_TOKEN: ${{ secrets.LOAD_TEST_AUTH_TOKEN }}
+          CHANNEL_TOKEN: ${{ secrets.LOAD_TEST_CHANNEL_TOKEN }}
+          PREVIEW_AGENT_ID: ${{ vars.LOAD_TEST_PREVIEW_AGENT_ID }}
+        run: |
+          k6 run \
+            -e BASE_URL="$BASE_URL" \
+            -e AUTH_TOKEN="$AUTH_TOKEN" \
+            -e CHANNEL_TOKEN="$CHANNEL_TOKEN" \
+            -e PREVIEW_AGENT_ID="$PREVIEW_AGENT_ID" \
+            infra/load/all.js
+
+      - name: Upload baseline summary
+        if: steps.target.outputs.url != '' && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: k6-summary
+          path: summary.json
+          if-no-files-found: ignore
+          retention-days: 90

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Autorizar acesso — Replider</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f2f4f8; color: #1a2233; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .card {
+      background: #fff; border-radius: 14px; padding: 32px;
+      max-width: 400px; width: 100%;
+      box-shadow: 0 8px 30px rgba(16, 24, 40, .08);
+    }
+    .brand { font-size: 20px; font-weight: 700; color: #2450ff; margin-bottom: 20px; }
+    h1 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+    p.sub { font-size: 14px; color: #5b6472; margin-bottom: 22px; line-height: 1.45; }
+    .scopes { background: #f6f8fb; border: 1px solid #e4e8ef; border-radius: 10px; padding: 14px 16px; margin-bottom: 22px; }
+    .scopes li { font-size: 13px; color: #3c4657; margin-left: 18px; padding: 2px 0; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    input[type=email], input[type=password], input[type=text] {
+      width: 100%; padding: 11px 12px; font-size: 15px;
+      border: 1px solid #cfd6e0; border-radius: 8px; margin-bottom: 16px;
+    }
+    input:focus { outline: 2px solid #2450ff; border-color: transparent; }
+    button {
+      width: 100%; padding: 12px; font-size: 15px; font-weight: 600;
+      background: #2450ff; color: #fff; border: 0; border-radius: 8px; cursor: pointer;
+    }
+    button:hover { background: #1c40d6; }
+    .cancel { display: block; text-align: center; margin-top: 14px; font-size: 13px; color: #5b6472; text-decoration: none; }
+    .error { background: #fdecec; border: 1px solid #f5c2c2; color: #a12622; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 16px; }
+    .footer { margin-top: 20px; font-size: 12px; color: #98a1af; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Replider</div>
+
+    {{if eq .Mode "error"}}
+      <h1>Não foi possível continuar</h1>
+      <p class="sub">{{.Error}}</p>
+      <p class="sub">Feche esta janela e tente conectar novamente a partir do Claude.</p>
+    {{else}}
+      <h1>{{if .ClientName}}{{.ClientName}}{{else}}Um aplicativo{{end}} quer acessar sua conta Replider</h1>
+      <p class="sub">Ao autorizar, o Claude poderá gerenciar sua conta em seu nome:</p>
+      <div class="scopes">
+        <ul>
+          <li>Configurar agentes de IA e base de conhecimento</li>
+          <li>Ler e responder conversas dos seus clientes</li>
+          <li>Ver métricas, uso e faturamento</li>
+        </ul>
+      </div>
+
+      {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+      <form method="post" action="">
+        <input type="hidden" name="flow_token" value="{{.FlowToken}}">
+        <input type="hidden" name="client_id" value="{{.ClientID}}">
+        <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
+        <input type="hidden" name="state" value="{{.State}}">
+        <input type="hidden" name="scope" value="{{.Scope}}">
+        <input type="hidden" name="code_challenge" value="{{.Challenge}}">
+        <input type="hidden" name="code_challenge_method" value="{{.Method}}">
+        <input type="hidden" name="response_type" value="code">
+
+        {{if eq .Mode "mfa"}}
+          <input type="hidden" name="mfa_session" value="{{.MfaSession}}">
+          <label for="code">Código de verificação (2FA)</label>
+          <input type="text" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+          <button type="submit">Verificar e autorizar</button>
+        {{else}}
+          <label for="email">E-mail</label>
+          <input type="email" id="email" name="email" value="{{.Email}}" autocomplete="email" required autofocus>
+          <label for="password">Senha</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required>
+          <button type="submit">Entrar e autorizar</button>
+        {{end}}
+      </form>
+      <a class="cancel" href="https://replider.com">Cancelar</a>
+    {{end}}
+
+    <div class="footer">Você está autorizando acesso via Replider MCP.</div>
+  </div>
+</body>
+</html>

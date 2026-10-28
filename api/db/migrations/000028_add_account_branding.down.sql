@@ -1,0 +1,3 @@
+ALTER TABLE accounts
+  DROP COLUMN IF EXISTS timezone,
+  DROP COLUMN IF EXISTS logo_url;

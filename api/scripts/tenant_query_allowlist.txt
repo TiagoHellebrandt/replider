@@ -1,0 +1,161 @@
+# Tenant-scope allowlist (US-F013).
+#
+# Format: QueryName  # reason
+#
+# Everything below the BASELINE marker is a query that already existed when
+# the checker landed. They were grandfathered in bulk, NOT individually
+# audited — most are primary-key lookups whose ownership is enforced in Go
+# after the fetch (GetByID → compare account_id), or platform-wide worker
+# queries. Treat the listed scope as a hint, not a proof.
+#
+# NEW queries must either filter by account_id or be added here with a real,
+# reviewed reason. Shrinking this list is a standing chore: when you touch a
+# baseline query, push the account_id filter down into the SQL and delete
+# its line.
+
+# ---- BASELINE (pre-US-F013, grandfathered) ----
+
+# account_webhooks.sql
+DisableWebhook  # account_webhooks: scoped by id
+RecordWebhookFailure  # account_webhooks: scoped by id
+RecordWebhookSuccess  # account_webhooks: scoped by id
+# accounts.sql
+CountActiveInternalThreads  # conversations: scoped by customer_account_id, status
+SystemHealthSummary  # conversations, users: scoped by suspended_at, subscription_status, is_active
+# agents.sql
+DeleteAgent  # agents: scoped by id
+GetAgentByID  # agents: scoped by id
+UpdateAgent  # agents: scoped by id
+# api_tokens.sql
+CountActivePATsByUser  # api_tokens: scoped by user_id, token_type, revoked_at
+DeleteExpiredAPITokens  # api_tokens: scoped by token_type
+GetRefreshTokenByHash  # api_tokens: scoped by token_hash, token_type
+ListOAuthConnectionsByUser  # api_tokens: scoped by user_id, token_type, revoked_at
+ListPATsByUser  # api_tokens: scoped by user_id, token_type, revoked_at
+RevokeOAuthConnection  # api_tokens: scoped by user_id, client_id, token_type
+RevokePATByIDAndUser  # api_tokens: scoped by id, user_id, token_type
+RevokeToken  # api_tokens: scoped by id, revoked_at
+RevokeTokenByHash  # api_tokens: scoped by token_hash, revoked_at
+RevokeTokenFamily  # api_tokens: scoped by family_id, revoked_at
+TouchAPITokenLastUsed  # api_tokens: scoped by id
+# campaigns.sql
+GetCampaignByRecipientProviderID  # campaigns: scoped by provider_msg_id
+IncrementCampaignCounter  # campaigns: scoped by id
+ListScheduledCampaignsDue  # campaigns: scoped by status
+UpdateCampaignStatus  # campaigns: scoped by id
+# canned_responses.sql
+DeleteCannedResponse  # canned_responses: scoped by id
+GetCannedResponseByID  # canned_responses: scoped by id
+UpdateCannedResponse  # canned_responses: scoped by id
+# channels.sql
+DeleteChannel  # channels: scoped by id
+GetChannelByID  # channels: scoped by id
+GetChannelByPhoneNumberID  # channels: scoped by provider, is_active
+GetChannelByWABAID  # channels: scoped by provider, is_active
+GetChannelByWebhookToken  # channels: scoped by webhook_token, is_active
+ListAllChannelsByProvider  # channels: scoped by provider
+ListChannelsByAgentID  # channels: scoped by agent_id
+ListChannelsByWABAID  # channels: scoped by provider, is_active
+MergeChannelCredentials  # channels: scoped by id
+ToggleChannel  # channels: scoped by id
+UpdateChannel  # channels: scoped by id
+UpdateChannelCredentialString  # channels: scoped by id
+# conversations.sql
+AutoResumeStuckConversations  # contacts, conversations: scoped by is_bot_paused, id, opted_out_at
+FindConversationByContact  # conversations: scoped by channel_id, contact_id
+MarkReminderSent  # conversations: scoped by id
+SetConversationCustomerAccount  # conversations: scoped by id, customer_account_id
+SetConversationLanguage  # conversations: scoped by id, language
+# csat.sql
+RecordCSATAnswer  # csat_ratings: scoped by conversation_id
+# ingestion_jobs.sql
+CompleteIngestionJob  # ingestion_jobs: scoped by id
+FailIngestionJob  # ingestion_jobs: scoped by id
+# leads.sql
+GetLeadByFunnelAndContact  # leads: scoped by funnel_id, contact_id
+GetLeadByID  # leads: scoped by id
+ListLeadsByFunnel  # leads: scoped by funnel_id
+MarkLeadBuyIntent  # leads: scoped by id, buy_intent_at
+MarkLeadQualified  # leads: scoped by id, qualified_at
+UpdateLeadMetadata  # leads: scoped by id
+UpdateLeadStatus  # leads: scoped by id
+# oauth.sql
+DeleteExpiredAuthorizationCodes  # oauth_authorization_codes: no WHERE (insert/global)
+GetAuthorizationCodeByHash  # oauth_authorization_codes: scoped by code_hash
+# outbound_scheduled.sql
+MarkOutboundScheduledFailed  # outbound_scheduled: scoped by id
+MarkOutboundScheduledSent  # outbound_scheduled: scoped by id
+RecoverStaleProcessingScheduled  # outbound_scheduled: scoped by status
+TouchOutboundScheduledAttempt  # outbound_scheduled: scoped by id
+# overage_charges.sql
+MarkOverageChargeCharged  # overage_charges: scoped by id
+MarkOverageChargeNeedsReview  # overage_charges: scoped by id
+# products.sql
+DeleteProduct  # products: scoped by id
+GetProductByID  # products: scoped by id
+UpdateProduct  # products: scoped by id
+# prompt_experiments.sql
+DeletePromptExperiment  # prompt_experiments: scoped by id
+GetPromptExperimentByID  # prompt_experiments: scoped by id
+GetRunningExperimentByAgent  # prompt_experiments: scoped by agent_id, status
+ListExperimentsByAgent  # prompt_experiments: scoped by agent_id
+SetExperimentWinner  # prompt_experiments: scoped by id
+UpdateExperimentStatus  # prompt_experiments: scoped by id
+# prompts.sql
+DeletePrompt  # prompts: scoped by id
+GetPromptByID  # prompts: scoped by id
+UpdatePrompt  # prompts: scoped by id
+# push_subscriptions.sql
+DeletePushSubscriptionByEndpoint  # push_subscriptions: scoped by user_id, endpoint
+DisablePushSubscriptionByEndpoint  # push_subscriptions: scoped by endpoint
+ListPushSubscriptionsByUser  # push_subscriptions: scoped by user_id, enabled
+TouchPushSubscription  # push_subscriptions: scoped by id
+# sales_funnels.sql
+DeleteSalesFunnel  # sales_funnels: scoped by id
+GetSalesFunnelByChannelID  # sales_funnels: scoped by channel_id, active
+GetSalesFunnelByID  # sales_funnels: scoped by id
+UpdateSalesFunnel  # sales_funnels: scoped by id
+# tags.sql
+DeleteTag  # tags: scoped by id
+GetTagByID  # tags: scoped by id
+ListTagsByConversation  # tags: scoped by conversation_id
+UpdateTag  # tags: scoped by id
+# usage.sql
+UpdateUsage  # account_usages: scoped by id
+# users.sql
+ClearResetToken  # users: scoped by id
+ConsumeTOTPRecoveryCode  # users: scoped by id
+DeactivateUser  # users: scoped by id
+DisableUserTOTP  # users: scoped by id
+EnableUserTOTP  # users: scoped by id
+GetUserByEmail  # users: scoped by email
+GetUserByGoogleID  # users: scoped by google_id
+GetUserByID  # users: scoped by id
+GetUserByMetaID  # users: scoped by meta_id
+GetUserByResetToken  # users: scoped by reset_token
+GetUserByVerificationToken  # users: scoped by verification_token
+MarkInviteSent  # users: scoped by id
+SetResetToken  # users: scoped by id
+SetUserGoogleID  # users: scoped by id
+SetUserMetaID  # users: scoped by id
+SetUserPicture  # users: scoped by id
+SetUserSignature  # users: scoped by id
+SetUserTOTPSecret  # users: scoped by id
+SetVerificationToken  # users: scoped by id
+StampTOTPVerified  # users: scoped by id
+UpdateLastSeen  # users: scoped by id
+UpdateUserPasswordHash  # users: scoped by id
+UpdateUserProfile  # users: scoped by id
+UpdateUserRole  # users: scoped by id
+VerifyUserEmail  # users: scoped by id
+# whatsapp_templates.sql
+ListWhatsAppTemplatesByChannel  # whatsapp_templates: scoped by channel_id
+
+# ---- Audited individually, 2026-09-15 ----
+# Four queries the guard flagged on a green main once CI came back from the
+# billing outage. Each call path was read before it was listed here; the
+# reason names the guard, not the table.
+FindLatestConversationByContact  # conversations: scoped by channel_id, and the channel is resolved from the inbound webhook token — the tenant boundary of that pipeline. Reopen() then writes with the row's own account_id.
+ClaimLeadForSend  # leads: the id reaches it only from ApproachUseCase.ApproveSend, after ownedLeadAndFunnel(accountID, leadID) proved the lead belongs to the caller.
+ListConversationMedia  # messages: HandleListConversationMedia refuses with 404 unless convRepo.GetByID(convID, accountID) returns the conversation first.
+GetUserSessionInvalidatedAt  # users: the id is the subject of the caller's own signed JWT; there is no cross-account read to make.

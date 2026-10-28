@@ -1,0 +1,24 @@
+FROM golang:1.25-alpine
+
+WORKDIR /app
+
+# Install air for hot reload, migrate CLI, ngrok, and build dependencies
+RUN apk add --no-cache git ca-certificates tzdata curl wget unzip && \
+    go install github.com/air-verse/air@latest && \
+    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest && \
+    curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar xz -C /usr/local/bin
+
+# Copy go mod files and download dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy entrypoint to a path NOT overridden by the /app volume mount
+COPY entrypoint.dev.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Source code is mounted as a volume at runtime
+# Air will watch for changes and rebuild automatically
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

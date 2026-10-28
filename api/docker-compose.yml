@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  replider-db:
+    image: postgres:16-alpine
+    container_name: replider_db
+    environment:
+      POSTGRES_USER: replider
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: replider_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U replider -d replider_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  replider-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replider_api
+    environment:
+      PORT: 8080
+      DB_HOST: replider-db
+      DB_PORT: 5432
+      DB_USER: replider
+      DB_PASSWORD: secret
+      DB_NAME: replider_db
+      DB_SSLMODE: disable
+    ports:
+      - "8080:8080"
+    depends_on:
+      replider-db:
+        condition: service_healthy
+
+# To run migrations manually:
+# make migrate-up
+# (Ensure you have 'migrate' CLI installed locally or use a one-off docker container)
+# Alternative docker command:
+# docker run --rm -v $(pwd)/db/migrations:/migrations --network replider_api_default migrate/migrate -path=/migrations/ -database "postgres://replider:secret@replider-db:5432/replider_db?sslmode=disable" up
+
+volumes:
+  pgdata:

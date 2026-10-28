@@ -1,0 +1,18 @@
+services:
+  test-db:
+    image: pgvector/pgvector:pg16
+    container_name: replider_test_db
+    environment:
+      POSTGRES_USER: replider_test
+      POSTGRES_PASSWORD: test_secret
+      POSTGRES_DB: replider_test_db
+    ports:
+      - "5434:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U replider_test -d replider_test_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 5s

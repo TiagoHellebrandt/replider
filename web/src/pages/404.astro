@@ -1,0 +1,63 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout
+  title="404 - Page Not Found | Replider"
+  description="Page not found"
+  lang="en"
+>
+  <main id="main" class="min-h-screen flex items-center justify-center px-6">
+    <div class="text-center">
+      <h1
+        class="text-8xl md:text-9xl font-black bg-gradient-to-b from-white to-white/30 bg-clip-text text-transparent mb-6"
+      >
+        404
+      </h1>
+
+      <!-- English copy (default) -->
+      <div data-lang="en">
+        <p class="text-xl md:text-2xl text-white/60 mb-10">Page not found</p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+          <a
+            href="/"
+            class="inline-flex items-center justify-center px-8 py-3 rounded-full bg-white text-black font-semibold hover:bg-white/90 transition-colors"
+          >
+            Go to Home
+          </a>
+        </div>
+      </div>
+
+      <!-- Portuguese copy -->
+      <div data-lang="pt" hidden>
+        <p class="text-xl md:text-2xl text-white/60 mb-10">
+          Página não encontrada
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+          <a
+            href="/pt/"
+            class="inline-flex items-center justify-center px-8 py-3 rounded-full bg-white text-black font-semibold hover:bg-white/90 transition-colors"
+          >
+            Ir para Início
+          </a>
+        </div>
+      </div>
+    </div>
+  </main>
+</Layout>
+
+<script is:inline>
+  // 404.astro builds to a single static page; the requested path is only known
+  // at runtime. Detect a /pt/* path and swap to the Portuguese copy.
+  (function () {
+    var isPt = window.location.pathname.split("/")[1] === "pt";
+    var lang = isPt ? "pt" : "en";
+    document.documentElement.lang = isPt ? "pt-BR" : "en";
+    document.title = isPt
+      ? "404 - Página não encontrada | Replider"
+      : "404 - Page Not Found | Replider";
+    document.querySelectorAll("[data-lang]").forEach(function (el) {
+      el.hidden = el.getAttribute("data-lang") !== lang;
+    });
+  })();
+</script>

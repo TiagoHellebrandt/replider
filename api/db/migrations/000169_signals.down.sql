@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS signal_watches;
+DROP TABLE IF EXISTS signals;

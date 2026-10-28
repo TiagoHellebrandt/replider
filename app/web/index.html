@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Replider — Vendas para quem vende equipamento hospitalar">
+  <meta name="theme-color" content="#0A0A0A">
+
+  <!-- iOS / Android home-screen install metadata -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="application-name" content="Replider">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Replider">
+  <!-- Multiple sizes so iOS picks the right one for the device. -->
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/Icon-512.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Replider</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!--
+    Service-worker bootstrap.
+    push-sw.js handles Web Push events AND satisfies the install-criteria
+    fetch handler (the browser only exposes the "Install app" affordance
+    when an active SW with a fetch handler is present).
+
+    On older builds users had a stale Flutter PWA SW caching old
+    main.dart.js. We unregister anything that isn't push-sw.js to flush
+    those leftovers, then explicitly register push-sw.js on every load —
+    register() is idempotent when the same script URL is already
+    installed.
+  -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        for (const r of regs) {
+          var url = (r.active && r.active.scriptURL)
+            || (r.waiting && r.waiting.scriptURL)
+            || (r.installing && r.installing.scriptURL)
+            || '';
+          // Unknown scriptURL → registration is mid-state-change. Skip
+          // rather than blindly unregister, otherwise we can kill our
+          // own push-sw while it's transitioning to active.
+          if (!url) continue;
+          if (url.indexOf('push-sw.js') !== -1) continue;
+          r.unregister();
+        }
+      }).catch(function () { /* ignore */ });
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('push-sw.js', { scope: '/' })
+          .catch(function () { /* SW unsupported / file missing — silent */ });
+      });
+    }
+    // Old Flutter SW left CacheStorage entries behind. Drop anything
+    // that isn't ours so a stale main.dart.js can't be served from
+    // disk after we ship a new build.
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (keys) {
+        return Promise.all(keys.map(function (k) {
+          if (k.indexOf('replider-shell-') === 0) return; // ours, keep
+          return caches.delete(k);
+        }));
+      }).catch(function () { /* ignore */ });
+    }
+
+    // PWA install state + Android beforeinstallprompt capture.
+    //
+    // Android Chrome fires `beforeinstallprompt` once, well before the
+    // user is likely to want it. We swallow the default mini-infobar
+    // and stash the deferred event so Dart can call .prompt() at the
+    // right moment (e.g. after the user dismisses an "Install Replider"
+    // snackbar). iOS Safari never fires this event; the Dart layer
+    // detects iOS via UA and shows the manual "Add to Home Screen"
+    // instructions instead.
+    window.__replider_pwa = {
+      deferredPrompt: null,
+      installed: false,
+    };
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      window.__replider_pwa.deferredPrompt = e;
+      // Dart polls __replider_pwa.deferredPrompt; an event fired before
+      // the watcher mounted is still picked up because we cache it here.
+    });
+    window.addEventListener('appinstalled', function () {
+      window.__replider_pwa.installed = true;
+      window.__replider_pwa.deferredPrompt = null;
+    });
+  </script>
+
+  <!-- Push notification client helpers. Thin wrapper so Dart stays out
+       of Push API ceremony. Must load before Flutter boots. -->
+  <script src="push-client.js"></script>
+</head>
+<body>
+  <!--
+    WhatsApp Embedded Signup plumbing.
+    The Facebook JS SDK is loaded lazily by replider_fb.initSdk() — see
+    whatsapp_embedded_signup_web.dart. We expose two helpers that Dart
+    calls via js_util:
+      replider_fb.initSdk(appId)  — inject fb-root + fbAsyncInit + sdk.js
+      replider_fb.login(configId) — FB.login with embedded-signup extras;
+                                    returns a Promise<{code}>
+
+    The global message listener captures Meta's WA_EMBEDDED_SIGNUP
+    session_info event (phone_number_id + waba_id) and stashes it on
+    window so Dart can read it after the login callback resolves.
+  -->
+  <script>
+    window.__replider_fb_session = null;
+    window.addEventListener('message', function (e) {
+      // Only trust messages from the embedded signup widget origin.
+      if (!e.origin || !/^https:\/\/([a-z]+\.)*facebook\.com$/i.test(e.origin)) return;
+      try {
+        const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (data && data.type === 'WA_EMBEDDED_SIGNUP') {
+          if (data.event === 'FINISH' || data.event === 'FINISH_ONLY_WABA') {
+            window.__replider_fb_session = data.data || null;
+          } else if (data.event === 'CANCEL' || data.event === 'ERROR') {
+            window.__replider_fb_session = { error: data.data || data.event };
+          }
+        }
+      } catch (_) { /* ignore non-JSON postMessages */ }
+    });
+
+    window.replider_fb = {
+      initSdk: function (appId) {
+        if (window.FB) return Promise.resolve();
+        return new Promise(function (resolve) {
+          window.fbAsyncInit = function () {
+            window.FB.init({
+              appId: appId,
+              autoLogAppEvents: true,
+              xfbml: true,
+              version: 'v25.0'
+            });
+            resolve();
+          };
+          const d = document;
+          if (!d.getElementById('fb-root')) {
+            const root = d.createElement('div');
+            root.id = 'fb-root';
+            d.body.appendChild(root);
+          }
+          const s = d.createElement('script');
+          s.async = true;
+          s.defer = true;
+          s.crossOrigin = 'anonymous';
+          s.src = 'https://connect.facebook.net/en_US/sdk.js';
+          d.head.appendChild(s);
+        });
+      },
+      login: function (configId) {
+        return new Promise(function (resolve) {
+          window.__replider_fb_session = null;
+          window.FB.login(function (response) {
+            resolve({
+              code: (response && response.authResponse && response.authResponse.code) || null,
+              session: window.__replider_fb_session,
+              status: response && response.status,
+            });
+          }, {
+            config_id: configId,
+            response_type: 'code',
+            override_default_response_type: true,
+            extras: { setup: {}, featureType: '', sessionInfoVersion: '3' }
+          });
+        });
+      }
+    };
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

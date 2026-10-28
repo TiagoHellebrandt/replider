@@ -1,0 +1,642 @@
+services:
+
+  # ── Reverse Proxy ─────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: replider_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    command: ["nginx", "-g", "daemon off;"]
+    volumes:
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      # US-194: static API reference (Redoc + OpenAPI 3.1 spec) for docs.replider.com
+      - ./nginx/docs:/etc/nginx/docs:ro
+    depends_on:
+      - api
+      - web
+      - app
+      - widget
+
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # ── Database ───────────────────────────────────────────────────────────────
+  db:
+    # US-F002: same pgvector base, plus wal-g for continuous off-site
+    # archiving. The pg-backup sidecar below still writes a local daily dump
+    # — belt and braces — but a dump on the same VPS dies with the VPS.
+    build:
+      context: ./docker/postgres-walg
+    image: replider-pg-walg:pg16
+    container_name: replider_db
+    restart: unless-stopped
+    # Bind-only-to-loopback port mapping so an SSH-tunneled DBeaver
+    # session can reach the DB at localhost:5432 on the VPS. The
+    # "127.0.0.1:" prefix is critical — without it, Docker would
+    # publish 5432 on every interface and expose the database to the
+    # public internet.
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      # wal-g (US-F002). ALL of these empty = archiving off, container behaves
+      # exactly like the stock image (dev must not need GCS credentials).
+      #   WALG_GS_PREFIX: gs://replider-pg-backups/prod
+      WALG_GS_PREFIX: ${WALG_GS_PREFIX:-}
+      # Three ways in, most specific wins: a mounted path, then a
+      # backup-only service account, then the one the API already uses.
+      # The last is what makes activation a single variable (the bucket)
+      # for an operator who accepts one shared key.
+      WALG_GOOGLE_CREDENTIALS_BASE64: ${WALG_GOOGLE_CREDENTIALS_BASE64:-}
+      GOOGLE_CREDENTIALS_BASE64: ${GOOGLE_CREDENTIALS_BASE64:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${WALG_GOOGLE_CREDENTIALS_PATH:-}
+      WALG_COMPRESSION_METHOD: ${WALG_COMPRESSION_METHOD:-lz4}
+      WALG_RETAIN_BACKUPS: ${WALG_RETAIN_BACKUPS:-14}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Service-account JSON, mounted read-only. Leave the host path empty in
+      # dev; docker treats an empty source as "no mount" only if the whole
+      # line is removed, so this is commented rather than templated:
+      #- /opt/replider/secrets/walg-gcs.json:/secrets/walg-gcs.json:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ── Redis (Caching & Background Jobs) ──────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: replider_redis
+    restart: unless-stopped
+    # appendonly yes → persists every write to disk (AOF); survives restarts/crashes
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # ── Antivírus para anexos de e-mail ────────────────────────────────────────
+  #
+  # OPCIONAL, e desligado até você definir CLAMD_ADDR. Sem ele os anexos são
+  # guardados e marcados como "não verificados" — e não verificado NÃO baixa,
+  # então a ausência do scanner nunca vira um arquivo servido como se
+  # estivesse limpo.
+  #
+  # Custo real: o banco de assinaturas mora em RAM (~960MB medidos). Não é uma
+  # peça barata; por isso é opt-in. O limite era 1.5G e NÃO era suficiente —
+  # ver CLAMD_CONF_ConcurrentDatabaseReload abaixo.
+  #
+  # Para ligar: subir este serviço e definir CLAMD_ADDR=clamav:3310 no .env.
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: replider_clamav
+    restart: unless-stopped
+    # Profile = o opt-in de verdade. Sem COMPOSE_PROFILES=antivirus no .env
+    # este serviço não sobe, não baixa imagem e não consome nada.
+    profiles: ["antivirus"]
+    # O ARGUMENTO É A CORREÇÃO, não uma opção de linha de comando: qualquer
+    # argumento começando com "-" faz o /init da imagem rodar `exec clamd`, e
+    # aí o clamd É o processo do container. O padrão da imagem sobe o clamd em
+    # background e termina em `tail -f /dev/null` — com isso o container fica
+    # "Up" com o scanner morto e o restart abaixo NUNCA dispara. Foi assim que
+    # o clamd passou seis dias fora depois de um OOM, e mais quatro depois:
+    # ninguém levantou porque, pro Docker, nada tinha caído.
+    #
+    # Com o clamd no PID 1: morreu -> container morre -> restart o traz de
+    # volta em ~2min (o tempo de carregar as assinaturas). A recuperação não
+    # depende de ninguém olhar o healthcheck, e não precisa de um autoheal
+    # com acesso ao socket do Docker (que seria root na máquina inteira).
+    command: ["--foreground"]
+    # Sem porta publicada: só a API fala com ele, pela rede interna.
+    networks:
+      - backend
+    volumes:
+      - clamavdb:/var/lib/clamav
+    environment:
+      # ISTO é o que impede o OOM. O clamd guarda ~960MB de assinaturas em
+      # RAM; no reload padrão ele monta a base NOVA ao lado da velha antes de
+      # trocar — perto de 1,9GB, acima do limite — e o kernel mata:
+      #
+      #   [Aug 28 06:51] Memory cgroup out of memory: Killed process (clamd)
+      #                  anon-rss:963932kB
+      #   [Sep  4 07:30] idem
+      #
+      # As duas mortes caíram dentro da janela de atualização do freshclam:
+      # o scanner morria fazendo justamente a coisa que o mantém útil.
+      # Recarregar no lugar bloqueia scans por alguns segundos, uma vez ao
+      # dia. É a troca certa contra um scanner que morre toda semana.
+      #
+      # Via CLAMD_CONF_* (o /init aplica no conf antes de subir) em vez de um
+      # clamd.conf montado: um mount substituiria o conf inteiro, obrigando a
+      # repetir tudo que a imagem escreve, e um mount read-only quebraria
+      # este mesmo mecanismo de sed.
+      CLAMD_CONF_ConcurrentDatabaseReload: "no"
+    healthcheck:
+      # PING/PONG é o handshake do próprio protocolo do clamd — responde
+      # apenas quando o banco de assinaturas terminou de carregar.
+      test: ["CMD-SHELL", "echo PING | nc -w 5 localhost 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 10s
+      # O primeiro carregamento leva minutos; sem esta janela o compose
+      # marcaria o serviço como não-saudável antes de ele terminar de subir.
+      start_period: 180s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # 2G, not 1536M: clamd's resident set is ~960 MB and the OOM kills
+          # happened at 1536M. ConcurrentDatabaseReload no (see
+          # docker/clamav/clamd.conf) is what actually removes the 2x reload
+          # spike; this is the headroom that keeps a signature set growing over
+          # the years from walking back into the same wall.
+          memory: 2G
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # O atualizador de assinaturas, agora em container próprio.
+  #
+  # Ele saiu de dentro do clamav porque o clamd só vira PID 1 (a recuperação
+  # automática acima) quando o /init da imagem faz `exec clamd` — e esse
+  # caminho não sobe o freshclam. Separar tem uma segunda vantagem: um
+  # atualizador que falhe ao baixar não derruba o scanner, e o scanner ao
+  # morrer não interrompe as atualizações.
+  #
+  # Escreve no MESMO volume; o clamd relê a base do disco no SelfCheck. Um
+  # volume vazio (máquina nova) faz o clamd reiniciar até este container
+  # baixar a primeira base — barulhento nos primeiros minutos, e correto.
+  clamav-freshclam:
+    image: clamav/clamav:1.4
+    container_name: replider_clamav_freshclam
+    restart: unless-stopped
+    profiles: ["antivirus"]
+    # Mesmo motivo do --foreground no clamd, e mesma armadilha: o caminho
+    # padrão da imagem termina em `tail -f /dev/null`, então um freshclam
+    # morto ficaria "Up" e as assinaturas envelheceriam em silêncio — que é
+    # pior do que não ter scanner, porque parece que tem.
+    #
+    # Um primeiro argumento executável faz o /init rodar `exec "$@"`, e o
+    # freshclam vira o processo do container: morreu, o container morre e
+    # volta. 24 checagens por dia = de hora em hora.
+    command: ["freshclam", "--checks=24", "--daemon", "--foreground", "--stdout"]
+    networks:
+      - backend
+    volumes:
+      - clamavdb:/var/lib/clamav
+    healthcheck:
+      # O healthcheck da IMAGEM é `clamdcheck.sh`, que faz PING no clamd — e
+      # aqui não roda clamd nenhum. Herdado, este container ficaria unhealthy
+      # para sempre, e um alarme falso permanente é o que ensina todo mundo a
+      # ignorar "unhealthy" — a mesma cegueira que deixou o clamd morto por
+      # dez dias.
+      #
+      # Este testa o trabalho que o container faz: a base foi escrita nas
+      # últimas 48h? O freshclam checa de hora em hora, então 48h só fica
+      # negativo se ele estiver realmente parado (ou o upstream fora do ar por
+      # dois dias, que também é coisa para se olhar).
+      test: ["CMD-SHELL", "find /var/lib/clamav -name 'daily.c*d' -mmin -2880 | grep -q ."]
+      interval: 5m
+      timeout: 10s
+      # A primeira base leva minutos para baixar numa máquina nova.
+      start_period: 600s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          # 512M NÃO sobrava, e a suposição de que sobrava é o que manteve as
+          # assinaturas congeladas por oito dias sem ninguém ver.
+          #
+          # O freshclam não só baixa e descompacta: antes de instalar a base
+          # nova ele a CARREGA para testar ("Testing database: …"), que é o
+          # mesmo custo de memória do clamd. Em produção isso morria assim, de
+          # hora em hora, 1824 vezes seguidas:
+          #
+          #   daily database available for update (local 28116, remote 28124)
+          #   Testing database: '…tmp-daily.cld' ...
+          #   ERROR: Database load killed by signal 9      ← OOM do cgroup
+          #   ERROR: Update failed.
+          #
+          #   [Sep 15 13:36] Memory cgroup out of memory: Killed process
+          #                  (freshclam) anon-rss:521140kB
+          #
+          # Ele voltava para a base velha e seguia "Up". O healthcheck de 48h
+          # logo abaixo é o que denuncia isso — e estava denunciando: unhealthy
+          # com FailingStreak 1824. Ninguém olhou.
+          #
+          # 1G dá folga sobre os 521M medidos; a base cresce. O VPS também
+          # ganhou 4G de swap, que é a rede de segurança para o pico do teste.
+          memory: 1G
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # ── PostgreSQL Backup (daily, 7-day retention) ─────────────────────────────
+  pg-backup:
+    image: postgres:16-alpine
+    container_name: replider_pg_backup
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      DB_USER: ${DB_USER}
+      DB_NAME: ${DB_NAME}
+    volumes:
+      - pgbackups:/backups
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    # Runs pg_dump every day at 03:00 UTC; keeps last 7 dumps
+    entrypoint: >
+      /bin/sh -c "
+        while true; do
+          FILENAME=/backups/replider_$$(date +%F_%H%M%S).sql.gz;
+          pg_dump -h db -U $$DB_USER $$DB_NAME | gzip > $$FILENAME;
+          echo \"[backup] $$FILENAME created\";
+          ls -1t /backups/*.sql.gz | tail -n +8 | xargs -r rm --;
+          echo \"[backup] old dumps pruned, sleeping 24h\";
+          sleep 86400;
+        done
+      "
+    # Healthy when a dump produced within the last 25h exists (the loop runs
+    # every 24h, so a missing/stale file means pg_dump is failing).
+    healthcheck:
+      test: ["CMD-SHELL", "find /backups -name '*.sql.gz' -mmin -1500 | grep -q ."]
+      interval: 1h
+      timeout: 10s
+      retries: 2
+      start_period: 5m
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # ── PostgreSQL Backup Verification (weekly restore drill) ──────────────────
+  # Backup existence != recoverability. This service restores the latest dump
+  # into a throwaway DB once a week and runs a smoke query, alerting via the
+  # Slack/Discord webhooks on failure (US-198). See infra/backup-verify.sh and
+  # docs/runbook.md ("Verify backups are restorable").
+  backup-verify:
+    image: postgres:16-alpine
+    container_name: replider_backup_verify
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      DB_USER: ${DB_USER}
+      DB_NAME: ${DB_NAME}
+      SLACK_ALERT_WEBHOOK_URL: ${SLACK_ALERT_WEBHOOK_URL:-}
+      DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-}
+    volumes:
+      - pgbackups:/backups
+      - ./infra/backup-verify.sh:/usr/local/bin/backup-verify.sh:ro
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-verify.sh"]
+    # Healthy when a successful restore happened within ~8 days (weekly cadence
+    # + one-cycle margin). A stale/missing marker means the restore is failing.
+    healthcheck:
+      test: ["CMD-SHELL", "find /backups/.last_verify_ok -mmin -11520 | grep -q ."]
+      interval: 6h
+      timeout: 10s
+      retries: 2
+      start_period: 15m
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # ── API ────────────────────────────────────────────────────────────────────
+  api:
+    image: ghcr.io/caritium/replider-api:${API_IMAGE_TAG:-latest}
+    container_name: replider_api
+    restart: unless-stopped
+    # The Go shutdown drains HTTP for 10s and then the WhatsApp outbox for
+    # up to 30s (main.go). Docker's default grace is 10s, so every deploy
+    # SIGKILLed the process mid-drain — in-flight replies and outbox sends
+    # died with it. 45s covers both windows with headroom.
+    stop_grace_period: 45s
+    environment:
+      APP_ENV: production
+      GIN_MODE: release
+      # US-F001 / fluxo-criacao-conta: fecha o cadastro público. O compose usa
+      # environment explícito (não env_file), então TODA var nova precisa de
+      # uma linha aqui ou nunca chega ao container — foi assim que o primeiro
+      # REGISTRATION_ENABLED=false do .env não fez nada.
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+      PORT: "8080"
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: disable
+      JWT_SECRET: ${JWT_SECRET}
+      # Interpolated from .env (the deploy writes the production-api `vars`),
+      # with a safe default of the dashboard origin. Was hardcoded to the API
+      # domain, which overrode the env var and made the password-reset email
+      # link point at api.replider.com (404). It must be app.replider.com, where
+      # the /reset-password screen lives. The :- default guards against an
+      # unset/empty var falling back to the API's localhost default.
+      APP_BASE_URL: ${APP_BASE_URL:-https://app.replider.com}
+      # MCP / OAuth (integração com Claude). API_PUBLIC_URL is the OAuth
+      # issuer — the /oauth and /mcp routes live on the API origin, NOT the
+      # dashboard, so it must never inherit APP_BASE_URL in prod.
+      # DASHBOARD_URL feeds the checkout redirect links minted by MCP tools.
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-https://api.replider.com}
+      DASHBOARD_URL: ${DASHBOARD_URL:-https://app.replider.com}
+      AI_PROVIDER: ${AI_PROVIDER}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # BYOK cost model (2026-09-01): every customer account runs on ITS OWN
+      # provider key; a keyless account gets BYOK_KEY_MISSING instead of
+      # spending the platform key above. The platform account stays exempt
+      # (ai_factory.go). This var never reached the container before this
+      # line existed — the flag was decided and silently off in prod.
+      AI_REQUIRE_BYOK: ${AI_REQUIRE_BYOK:-true}
+      # Ceiling for accounts with no ai_monthly_budget_cents of their own
+      # (BRL cents; 5000 = R$50). 0 = no default ceiling.
+      AI_DEFAULT_MONTHLY_BUDGET_CENTS: ${AI_DEFAULT_MONTHLY_BUDGET_CENTS:-5000}
+      # Places has no BYOK: bound the platform's bill per account per day.
+      PLACES_DAILY_CAP_PER_ACCOUNT: ${PLACES_DAILY_CAP_PER_ACCOUNT:-50}
+      # Observability / alerting (all optional; empty = feature off).
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-replider-api}
+      # Stamped by the deploy (the image tag) so Sentry releases and the
+      # /health/details answer name the SHA actually running.
+      RELEASE_SHA: ${RELEASE_SHA:-${API_IMAGE_TAG:-}}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # JWT rotation: the PREVIOUS signing key stays valid for verification
+      # only while a rotation is in flight (docs/secret-rotation.md).
+      JWT_SECRET_PREVIOUS: ${JWT_SECRET_PREVIOUS:-}
+      # Reverse-proxy chain trusted for X-Forwarded-For (nginx in front).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # Operator token for GET /health/details (and /metrics when set).
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # Re-registers the archived v1 MCP tools. Off since the SDR pivot.
+      MCP_LEGACY_TOOLS: ${MCP_LEGACY_TOOLS:-false}
+      # Starts the self-serve SaaS workers (CSAT, digests, win-back, PIX
+      # renewal ladder, Stripe/WA metering) + sequence enrollment/autopilot.
+      LEGACY_WORKERS: ${LEGACY_WORKERS:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
+      GOOGLE_CREDENTIALS_BASE64: ${GOOGLE_CREDENTIALS_BASE64}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      # Per-account "Conectar Google Calendar" OAuth (empty = feature off,
+      # service-account booking fallback still works). Secret provisioned
+      # in production-api since 2026-04 alongside GOOGLE_CLIENT_ID.
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Prospecção via Google Places API (New). Vazio = o adaptador recusa
+      # toda busca com PROSPECTING_NOT_CONFIGURED, que é o estado em que a
+      # produção rodou até aqui: o copiloto oferecia "Ache 20 clínicas em
+      # São Paulo" como primeira sugestão e falhava nela.
+      # Chave própria, restrita a Places API (New) + IP da VPS — a service
+      # account de GOOGLE_CREDENTIALS_BASE64 também autenticaria, mas ela
+      # carrega GCS, Calendar e o archiving do Postgres, e somar gasto por
+      # request a essa credencial aumenta o estrago de um vazamento.
+      GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
+      # Sales-led (2026-08-19): the calendar page a prospect books a call on.
+      # Public URL, not a secret — a production-api VARIABLE. Empty = the
+      # app and the site fall back to WhatsApp/e-mail.
+      BOOKING_URL: ${BOOKING_URL:-}
+      CORS_ALLOWED_ORIGINS: https://app.replider.com,https://replider.com,https://www.replider.com
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+      # Hybrid bulk sending (2026-08-25): Resend HTTP API key. Empty =
+      # volume sending unavailable (fails closed); individual approvals
+      # keep flowing through each customer's own mailbox.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      WHATSAPP_APP_ID: ${WHATSAPP_APP_ID}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
+      WEBPUSH_VAPID_PUBLIC_KEY: ${WEBPUSH_VAPID_PUBLIC_KEY}
+      WEBPUSH_VAPID_PRIVATE_KEY: ${WEBPUSH_VAPID_PRIVATE_KEY}
+      WEBPUSH_SUBJECT: ${WEBPUSH_SUBJECT}
+      # Comma-separated allowlist of operator emails granted /v1/owner/*
+      # access. Resolved at request time by middleware.RequireSuperAdmin.
+      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS}
+      # When true, the owner middleware additionally requires TOTP 2FA
+      # enrolled + a fresh proof. Default TRUE since 2026-09-01 (every
+      # super-admin is enrolled); set false in .env only to unlock a
+      # locked-out operator, and flip it back.
+      SUPER_ADMIN_REQUIRE_2FA: ${SUPER_ADMIN_REQUIRE_2FA:-true}
+      # AES-256-GCM key (64 hex chars) encrypting users.totp_secret_encrypted
+      # at rest (US-076). Without it the API runs degraded and 2FA
+      # enrollment is refused (TOTP_CIPHER_UNCONFIGURED).
+      TOTP_KEK: ${TOTP_KEK}
+      # AES-256-GCM key (64 hex chars) encrypting accounts' BYOK provider
+      # API keys (openai/gemini) at rest. Without it the API runs degraded
+      # and saving a contract account's API key is refused
+      # (BYOK_CIPHER_UNCONFIGURED → 503). Separate key from TOTP_KEK for an
+      # independent blast radius. Generate with: openssl rand -hex 32.
+      BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY}
+      # Account id of the Replider-owned platform account. Gates the whole
+      # seller/customer-success system (RequirePlatformAccount, commission
+      # ledger, seller panel). Empty/unset = all seller features fail closed
+      # (404) — safe default for self-hosted. Set as a production-api GitHub
+      # secret; the deploy dumps all non-infra secrets into .env.
+      PLATFORM_ACCOUNT_ID: ${PLATFORM_ACCOUNT_ID}
+      REDIS_URL: redis://redis:6379
+      # Vazio = sem varredura de anexo. Ver o serviço clamav acima.
+      CLAMD_ADDR: ${CLAMD_ADDR:-}
+      # Cache local de mídia (proxy /v1/media/file + pré-aquecimento no
+      # ingest de e-mail). O volume preserva o cache entre restarts; sem
+      # ele o primeiro acesso pós-deploy volta a pagar o fetch do GCS.
+      MEDIA_CACHE_DIR: /var/cache/replider-media
+      MEDIA_CACHE_MAX_MB: "2048"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - mediacache:/var/cache/replider-media
+    networks:
+      - backend
+      - proxy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      # 10s, not 5: /health runs its probes sequentially (DB 2s + storage 4s
+      # since 2026-08-19) and a slow-but-honest answer must not be killed
+      # mid-reply and read as unhealthy.
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          memory: 768M
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # ── Web (Landing Page — replider.com) ─────────────────────────────────────
+  web:
+    image: ghcr.io/caritium/replider-web:${WEB_IMAGE_TAG:-latest}
+    container_name: replider_web
+    restart: unless-stopped
+    networks:
+      - proxy
+    healthcheck:
+      # 127.0.0.1, not localhost: inside these images `localhost` resolves
+      # to ::1 first and nginx listens on IPv4 only, so the probe got
+      # "Connection refused" on every tick and the container sat at
+      # `unhealthy` for weeks while serving fine through the proxy.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # ── App (Flutter Web — app.replider.com) ──────────────────────────────────
+  app:
+    image: ghcr.io/caritium/replider-app:${APP_IMAGE_TAG:-latest}
+    container_name: replider_app
+    restart: unless-stopped
+    networks:
+      - proxy
+    healthcheck:
+      # 127.0.0.1, not localhost: inside these images `localhost` resolves
+      # to ::1 first and nginx listens on IPv4 only, so the probe got
+      # "Connection refused" on every tick and the container sat at
+      # `unhealthy` for weeks while serving fine through the proxy.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  # ── Webchat widget CDN (cdn.replider.com) ──────────────────────────────────
+  # Tiny nginx serving the embeddable widget.js + widget.css. Loaded by the
+  # script tag installed on customer websites. No auth, public, cacheable.
+  widget:
+    image: ghcr.io/caritium/replider-widget:${WIDGET_IMAGE_TAG:-latest}
+    container_name: replider_widget
+    restart: unless-stopped
+    networks:
+      - proxy
+    healthcheck:
+      # 127.0.0.1 for the same reason as web/app above.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+networks:
+  proxy:
+    name: replider_proxy
+  backend:
+    name: replider_backend
+    # NOTE: cannot be `internal: true` — Docker silently drops `ports:` host
+    # bindings on internal networks (db's 127.0.0.1:5432:5432 ends up unbound,
+    # breaking the SSH-tunneled DBeaver flow). External isolation is enforced
+    # at the host instead: UFW blocks public 5432, and the only published port
+    # is bound to 127.0.0.1, so the DB is reachable only via loopback/SSH tunnel.
+    # No service in this network publishes to the public internet.
+
+volumes:
+  pgdata:
+    name: replider_pgdata
+  redisdata:
+    name: replider_redisdata
+  pgbackups:
+    name: replider_pgbackups
+  clamavdb:
+    name: replider_clamavdb
+  mediacache:
+    name: replider_mediacache

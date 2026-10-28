@@ -1,0 +1,30 @@
+---
+// Canonical signup entry on the marketing domain (US-003):
+// replider.com/register?ref=SELLERCODE is the link sellers hand out.
+// It exists only to forward the FULL query string (ref, utm_*, lang,
+// coupon) into the app's register flow, where UtmBootstrap captures
+// ?ref= before GoRouter strips the query. Keep this a pure redirect —
+// no content, no analytics — so attribution never depends on this page.
+const appRegisterUrl = "https://app.replider.com/register";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Replider</title>
+    <script is:inline define:vars={{ appRegisterUrl }}>
+      location.replace(appRegisterUrl + location.search);
+    </script>
+    <noscript>
+      <meta http-equiv="refresh" content={`0;url=${appRegisterUrl}`} />
+    </noscript>
+  </head>
+  <body>
+    <p>
+      Redirecting to <a href={appRegisterUrl}>{appRegisterUrl}</a>…
+    </p>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+# Rotas que NUNCA terão chamador em app/lib — por design, não por esquecimento.
+# Uma regex por linha (testada contra "METHOD /path" E contra o arquivo de
+# registro), com a justificativa depois do #. Linha sem justificativa é uma
+# exceção que ninguém consegue rever — não adicione uma.
+webhook               # webhooks (Stripe, AbacatePay, canais): chamados pelos provedores externos, jamais pelo app
+^GET /\.well-known/   # metadata OAuth 2.1 (AS/protected-resource): consumida por clientes MCP (Claude/OpenAI), não pelo dashboard
+^GET /swagger/        # UI de documentação embutida no binário, aberta no navegador
+owner_routes\.go      # painel de plataforma (super-admin): superfície do dono, gate próprio; telas cobertas por app/owner ou curl operacional
+seller_routes\.go     # painel de vendedor da plataforma: superfície interna, não faz parte do app do cliente
+# Canários de infra do grupo /admin (o coletor não resolve o prefixo do
+# gin.Group, então a exceção é pelo segmento): operacional, consumido por curl.
+/wa-webhook-events    # eventos brutos de webhook WhatsApp p/ debug de plataforma
+/wa-meter             # medidor de billing WhatsApp — leitura operacional
+/agents/invalid-timezones  # canário de dados: agentes com fuso inválido
+^GET /health/details  # breakdown operacional de /health (vendors/hosts/erros de probe), protegido por METRICS_TOKEN; consumido por curl/monitor, nunca pelo app

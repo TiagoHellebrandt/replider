@@ -1,0 +1,23 @@
+-- A signal watch with no UF is not a watch.
+--
+-- The poll's scope is the UNION of the watches in it (services.watchUFs), and
+-- an unscoped row used to mean "anywhere" — so ONE of them made every other
+-- account's fetch national. Exactly one existed in production: a dogfood
+-- watch for the word "luva", no UF, created 2026-08-01. From that day every
+-- tick walked 3 modalities x up to 40 pages of the whole country's feed
+-- (~120 requests) against a free, unauthenticated government API, instead of
+-- the single page MT publishes in 48 hours. PNCP answered the way anyone
+-- would: 429, then 502, 503 and timeouts, and the radar sat empty while the
+-- source took the blame.
+--
+-- Unscoped watches can no longer be saved (domain.SignalWatch
+-- .NormalizeAndValidate, enforced on the HTTP route, the MCP tool and the
+-- seeder). This removes the ones already stored.
+--
+-- Deleted rather than deactivated: an inactive PNCP row still counts as "this
+-- account has a watch" for AccountsNeedingDefaultWatch, which would stop the
+-- seeder from ever giving the account a scoped one. An account with a
+-- territory and products gets a proper watch back on the next tick; one
+-- without a territory gets none, which is the honest answer.
+DELETE FROM signal_watches
+ WHERE states IS NULL OR cardinality(states) = 0;

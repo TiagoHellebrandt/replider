@@ -1,0 +1,62 @@
+# US-F003: monthly proof that the backup restores.
+#
+# A backup job that silently broke and a backup job that is working look
+# identical from the outside — both are quiet. This workflow is the only
+# thing that tells them apart, and it does so BEFORE the day we need it.
+#
+# It runs against the production bucket in READ-ONLY mode: it fetches the
+# latest base backup into a throwaway container and never writes to the
+# bucket or touches the live database.
+name: Backup restore drill
+
+on:
+  schedule:
+    # 04:00 UTC on the 1st of every month (01:00 in São Paulo — deliberately
+    # outside business hours in case the drill saturates bucket egress).
+    - cron: "0 4 1 * *"
+  workflow_dispatch: {}
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    # The drill needs the bucket credentials, so it runs in the same
+    # environment as the API deploy.
+    environment: production-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the wal-g image
+        run: docker build -t replider-pg-walg:latest ./docker/postgres-walg
+
+      - name: Write the service-account key
+        env:
+          WALG_GCS_CREDENTIALS_JSON: ${{ secrets.WALG_GCS_CREDENTIALS_JSON }}
+        run: |
+          if [ -z "${WALG_GCS_CREDENTIALS_JSON}" ]; then
+            echo "::error::WALG_GCS_CREDENTIALS_JSON is not set — the drill cannot read the bucket."
+            exit 1
+          fi
+          printf '%s' "${WALG_GCS_CREDENTIALS_JSON}" > "${RUNNER_TEMP}/walg-gcs.json"
+          chmod 600 "${RUNNER_TEMP}/walg-gcs.json"
+
+      - name: Restore the latest backup and run smoke queries
+        env:
+          WALG_GS_PREFIX: ${{ vars.WALG_GS_PREFIX }}
+          DB_USER: ${{ secrets.DB_USER }}
+          POSTGRES_DB: ${{ secrets.DB_NAME }}
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="${RUNNER_TEMP}/walg-gcs.json"
+          ./scripts/backup-restore-drill.sh
+
+      - name: Report failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          # The drill failing IS the incident: it means production is
+          # currently unrecoverable. Page the same channel as AI failures.
+          if [ -n "${ALERT_WEBHOOK_URL}" ]; then
+            curl -fsS -X POST -H 'Content-Type: application/json' \
+              -d '{"text":"🚨 Replider: monthly restore drill FAILED — production backups are not restorable. Run: ./scripts/backup-restore-drill.sh"}' \
+              "${ALERT_WEBHOOK_URL}" || true
+          fi

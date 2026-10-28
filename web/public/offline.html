@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Offline · Replider</title>
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: #0a0a0a;
+        color: #fff;
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 1.5rem;
+        box-sizing: border-box;
+      }
+      .card {
+        max-width: 28rem;
+      }
+      img {
+        height: 2rem;
+        width: auto;
+        margin-bottom: 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        color: #a1a1aa;
+        line-height: 1.6;
+        margin: 0 0 1.75rem;
+      }
+      button {
+        background: #fff;
+        color: #000;
+        border: 0;
+        border-radius: 0.625rem;
+        padding: 0.7rem 1.4rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #e5e5e5;
+      }
+      .sub {
+        margin-top: 1.25rem;
+        font-size: 0.8rem;
+        color: #71717a;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <img src="/logo_white.webp" alt="Replider" />
+      <h1 data-i18n="title">You're offline</h1>
+      <p data-i18n="body">
+        We couldn't reach the network. Check your connection and try again — any
+        pages you've already visited remain available.
+      </p>
+      <button onclick="location.reload()" data-i18n="retry">Try again</button>
+      <p class="sub" lang="pt">
+        Você está offline. Verifique sua conexão e tente novamente.
+      </p>
+    </div>
+    <script>
+      // Lightweight bilingual swap: if the browser prefers Portuguese, localise
+      // the main copy (the offline page is a single precached file shared by
+      // both /en and /pt).
+      if ((navigator.language || "").toLowerCase().startsWith("pt")) {
+        document.documentElement.lang = "pt";
+        document.title = "Offline · Replider";
+        var t = {
+          title: "Você está offline",
+          body: "Não foi possível acessar a rede. Verifique sua conexão e tente novamente — as páginas que você já visitou continuam disponíveis.",
+          retry: "Tentar novamente",
+        };
+        document.querySelectorAll("[data-i18n]").forEach(function (el) {
+          var k = el.getAttribute("data-i18n");
+          if (t[k]) el.textContent = t[k];
+        });
+        var sub = document.querySelector(".sub");
+        if (sub) sub.textContent = "";
+      }
+    </script>
+  </body>
+</html>

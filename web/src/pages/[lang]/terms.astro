@@ -1,0 +1,153 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Header from "../../components/Header.astro";
+import { getLangFromUrl, useTranslations } from "../../i18n/utils";
+
+export function getStaticPaths() {
+  return [{ params: { lang: "pt" } }];
+}
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+---
+
+<Layout
+  title={t("terms.title") as string}
+  description={t("terms.description") as string}
+  lang={lang}
+>
+  <Header />
+
+  <main class="min-h-screen pt-32 pb-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h1 class="text-4xl md:text-5xl font-bold mb-4">{t("terms.heading")}</h1>
+      <p class="text-white/40 text-sm mb-12">{t("terms.lastUpdated")}</p>
+
+      <div
+        class="prose prose-invert max-w-none space-y-10 text-white/70 leading-relaxed"
+      >
+        <p>{t("terms.intro")}</p>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section1.title")}
+          </h2>
+          <p>{t("terms.section1.text")}</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section2.title")}
+          </h2>
+          <ul class="list-disc list-inside space-y-2">
+            {
+              (t("terms.section2.items") as unknown as string[]).map(
+                (item: string) => <li>{item}</li>,
+              )
+            }
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section3.title")}
+          </h2>
+          <ul class="list-disc list-inside space-y-2">
+            {
+              (t("terms.section3.items") as unknown as string[]).map(
+                (item: string) => <li>{item}</li>,
+              )
+            }
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section4.title")}
+          </h2>
+          <p class="mb-4">{t("terms.section4.text")}</p>
+          <ul class="list-disc list-inside space-y-2">
+            {
+              (t("terms.section4.items") as unknown as string[]).map(
+                (item: string) => <li>{item}</li>,
+              )
+            }
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section5.title")}
+          </h2>
+          <p class="mb-4">{t("terms.section5.text1")}</p>
+          <p>{t("terms.section5.text2")}</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section6.title")}
+          </h2>
+          <p class="mb-4">{t("terms.section6.text1")}</p>
+          <p class="mb-4">{t("terms.section6.text2")}</p>
+          <p class="mb-4">{t("terms.section6.text3")}</p>
+          <p>{t("terms.section6.text4")}</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section7.title")}
+          </h2>
+          <p class="mb-4">{t("terms.section7.text1")}</p>
+          <p>{t("terms.section7.text2")}</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section8.title")}
+          </h2>
+          <p>{t("terms.section8.text")}</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section9.title")}
+          </h2>
+          <p>{t("terms.section9.text")}</p>
+        </section>
+
+        <section>
+          <h2 class="text-xl font-semibold text-white mb-4">
+            {t("terms.section10.title")}
+          </h2>
+          <p class="mb-2">{t("terms.section10.text")}</p>
+          <p class="font-medium text-white/90">{t("terms.section10.email")}</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="py-12 border-t border-white/5 bg-black px-6">
+    <div
+      class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8 text-white/20 text-sm"
+    >
+      <div>{t("footer.rights")}</div>
+      <div class="flex gap-8">
+        <a
+          href={`/${lang}/privacy`}
+          aria-label={t("footer.privacy") as string}
+          class="hover:text-white transition-colors">{t("footer.privacy")}</a
+        >
+        <a href={`/${lang}/dpa`} class="hover:text-white transition-colors"
+          >{t("footer.dpa")}</a
+        >
+        <a href={`/${lang}/terms`} class="hover:text-white transition-colors"
+          >{t("footer.terms")}</a
+        >
+        <a
+          href="mailto:support@replider.com"
+          class="hover:text-white transition-colors">{t("footer.contact")}</a
+        >
+      </div>
+    </div>
+  </footer>
+</Layout>

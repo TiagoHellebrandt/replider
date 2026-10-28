@@ -1,0 +1,104 @@
+{{define "base.html"}}<!DOCTYPE html>
+<html lang="{{.Locale}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{.Subject}}</title>
+</head>
+<body style="margin:0;padding:0;background:#0A0A0A;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<!--
+  Outer wrapper matches the dashboard dark surface so the email feels
+  continuous with the in-app experience. The card itself sits on a
+  near-black canvas with subtle borders so logos / accent colors pop.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0A0A0A;padding:24px 12px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;background:#111111;border-radius:14px;border:1px solid #1F1F1F;overflow:hidden;">
+
+        <!-- Header / brand bar -->
+        <tr>
+          <td align="center" style="padding:32px 32px 16px 32px;background:linear-gradient(135deg,{{.BrandColor}} 0%,#1E40AF 100%);">
+            {{if .BrandLogoURL}}
+              <img src="{{.BrandLogoURL | safeURL}}" alt="{{.BrandName}}" width="56" height="56" style="display:block;border:0;outline:none;text-decoration:none;border-radius:12px;background:#0A0A0A;padding:8px;">
+            {{end}}
+            <h1 style="margin:12px 0 0 0;color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.4px;">
+              {{.BrandName}}
+            </h1>
+          </td>
+        </tr>
+
+        <!-- Title strip — short, larger, sets the tone of the email -->
+        {{if .HeaderTitle}}
+        <tr>
+          <td style="padding:24px 32px 4px 32px;">
+            <h2 style="margin:0;color:#FFFFFF;font-size:22px;font-weight:700;line-height:1.3;">
+              {{.HeaderTitle}}
+            </h2>
+          </td>
+        </tr>
+        {{end}}
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:16px 32px 8px 32px;color:#D4D4D4;font-size:15px;line-height:1.6;">
+            {{if .Greeting}}
+              <p style="margin:0 0 16px 0;color:#FFFFFF;font-weight:600;font-size:16px;">{{.Greeting}}</p>
+            {{end}}
+            {{if .IntroHTML}}{{.IntroHTML}}{{end}}
+            {{if .BodyHTML}}{{.BodyHTML}}{{end}}
+          </td>
+        </tr>
+
+        <!-- CTA button. Bulletproof bg-image-on-vml hack omitted — we
+             control the rendering surfaces (Resend, Gmail, native iOS
+             Mail) and tested they all honor inline background colors. -->
+        {{if .CTAURL}}
+        <tr>
+          <td align="center" style="padding:8px 32px 24px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="border-radius:10px;background:{{.BrandColor}};">
+                  <a href="{{.CTAURL | safeURL}}" target="_blank" style="display:inline-block;padding:14px 28px;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:15px;border-radius:10px;">
+                    {{.CTALabel}}
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        {{end}}
+
+        <!-- Footnote (small print under CTA — link expiry, security note, etc.) -->
+        {{if .FootnoteHTML}}
+        <tr>
+          <td style="padding:0 32px 24px 32px;color:#8A8A8A;font-size:13px;line-height:1.55;">
+            {{.FootnoteHTML}}
+          </td>
+        </tr>
+        {{end}}
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:18px 32px;background:#0A0A0A;border-top:1px solid #1F1F1F;color:#6B6B6B;font-size:11px;line-height:1.55;">
+            <p style="margin:0 0 4px 0;">{{.FooterTagline}}</p>
+            <p style="margin:0;">&copy; {{.Year}} {{.BrandName}}. {{if eq .Locale "pt-BR"}}Todos os direitos reservados.{{else}}All rights reserved.{{end}}</p>
+            {{if .UnsubscribeURL}}
+              <p style="margin:8px 0 0 0;">
+                <a href="{{.UnsubscribeURL | safeURL}}" style="color:#6B6B6B;text-decoration:underline;">
+                  {{if eq .Locale "pt-BR"}}Cancelar inscrição{{else}}Unsubscribe{{end}}
+                </a>
+              </p>
+            {{end}}
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>{{end}}

@@ -1,0 +1,12 @@
+-- Deliberate no-op.
+--
+-- The up side only populated a column that has existed since 000009. Nulling it
+-- again would be destructive for no gain: the pre-000196 code never read
+-- contact_ref_id except in the AutoResumeStuckConversations opt-out guard, and
+-- there a populated value makes the guard WORK rather than regress. Clearing it
+-- would also throw away bindings the up side cannot always re-derive (a contact
+-- whose external_id changed after the thread was created).
+--
+-- Rolling back the schema is what a down migration owes; un-learning a fact is
+-- not.
+SELECT 1;

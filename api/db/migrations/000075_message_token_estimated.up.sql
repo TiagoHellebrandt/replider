@@ -1,0 +1,12 @@
+-- US-042: flag fallback (estimated) token usage on AI messages.
+--
+-- input_tokens / output_tokens come from the provider's usage report, but
+-- some streamed responses omit usage (e.g. when the provider truncates the
+-- response). In that case the pipeline falls back to a len(text)/4 heuristic
+-- so cost attribution is never silently zero. token_estimated = true marks
+-- those rows so A/B token attribution and billing can discount estimates
+-- instead of trusting them as exact provider counts.
+--
+-- NULL on pre-existing rows and on non-AI messages (inbound, human replies);
+-- only AI-generated outbound messages carry an explicit true/false.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS token_estimated BOOLEAN;
